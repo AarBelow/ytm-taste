@@ -1,0 +1,8 @@
+ytmusicapi
+fastapi
+uvicorn[standard]
+requests
+python-dotenv
+pytest
+httpx
+ruff
