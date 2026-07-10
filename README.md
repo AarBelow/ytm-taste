@@ -41,7 +41,7 @@ One-time setup — generate a YouTube Music auth file (requires pasting request
 headers copied from your browser while logged into music.youtube.com; this
 step is interactive and must be run by you, not automated):
 ```
-.venv\Scripts\ytmusicapi.exe browser --file ytmusic_auth.json
+ytmusicapi browser --file ytmusic_auth.json
 ```
 
 Then, whenever you want to pull your latest listening history into the
