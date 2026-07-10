@@ -35,6 +35,25 @@ FastAPI + HTML/JS web app you open in your browser.
    pytest
    ```
 
+## Fetching Your Listening History
+
+One-time setup — generate a YouTube Music auth file (requires pasting request
+headers copied from your browser while logged into music.youtube.com; this
+step is interactive and must be run by you, not automated):
+```
+.venv\Scripts\ytmusicapi.exe browser --file ytmusic_auth.json
+```
+
+Then, whenever you want to pull your latest listening history into the
+database:
+```
+python -m ytm_taste.sync
+```
+
+Each run adds new observations to `data/ytm_taste.db` without erasing
+anything already stored — safe to run repeatedly (e.g. weekly) to build up
+history over time.
+
 ## Roadmap
 
 1. **Project scaffolding** — folder structure, FastAPI hello-world, venv, tests wired up (this phase)

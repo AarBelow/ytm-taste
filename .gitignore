@@ -220,3 +220,6 @@ __marimo__/
 # ytm-taste data
 data/*
 !data/.gitkeep
+
+# ytm-taste auth
+ytmusic_auth.json
