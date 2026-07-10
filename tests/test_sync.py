@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from ytm_taste import db, sync
@@ -81,3 +83,25 @@ def test_run_sync_raises_clear_error_when_auth_file_missing(tmp_path):
     missing_auth = str(tmp_path / "missing.json")
     with pytest.raises(RuntimeError, match="ytmusicapi browser"):
         sync.run_sync(db_path, missing_auth)
+
+
+def test_run_sync_rolls_back_all_writes_on_mid_loop_failure(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    songs_with_bad_second_entry = [
+        fake_songs()[0],
+        {"videoId": "v_bad", "title": None, "artists": [], "played": "Today"},
+    ]
+
+    with pytest.raises(sqlite3.IntegrityError):
+        sync.run_sync(
+            db_path,
+            "unused.json",
+            fetch_history_fn=lambda client: songs_with_bad_second_entry,
+            client=object(),
+        )
+
+    conn = db.get_connection(db_path)
+    tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    assert tracks == 0
+    sync_runs = conn.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0]
+    assert sync_runs == 0
