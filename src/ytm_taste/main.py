@@ -120,6 +120,7 @@ def login_status(flow_id: str, request: Request, background_tasks: BackgroundTas
     now = datetime.now(timezone.utc).isoformat()
     user_id = db.get_or_create_user(conn, channel_handle, json.dumps(result.token), now)
     conn.commit()
+    conn.close()
 
     request.session["user_id"] = user_id
     background_tasks.add_task(sync.run_sync, DB_PATH, user_id, client)
