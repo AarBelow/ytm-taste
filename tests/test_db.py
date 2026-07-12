@@ -76,8 +76,12 @@ def test_link_track_artist_and_finish_sync_run():
 
 def test_get_or_create_user_returns_same_id_for_existing_channel_handle():
     conn = make_conn()
-    first_id = db.get_or_create_user(conn, "@user1", '{"access_token": "a"}', "2026-07-10T00:00:00")
-    second_id = db.get_or_create_user(conn, "@user1", '{"access_token": "b"}', "2026-07-10T00:01:00")
+    first_id = db.get_or_create_user(
+        conn, "@user1", '{"access_token": "a"}', "2026-07-10T00:00:00"
+    )
+    second_id = db.get_or_create_user(
+        conn, "@user1", '{"access_token": "b"}', "2026-07-10T00:01:00"
+    )
     assert first_id == second_id
     rows = conn.execute("SELECT id FROM users WHERE channel_handle = ?", ("@user1",)).fetchall()
     assert len(rows) == 1

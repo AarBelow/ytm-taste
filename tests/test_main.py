@@ -59,7 +59,11 @@ def test_login_status_done_creates_user_and_triggers_sync(monkeypatch, tmp_path)
             status="done", token=fake_token
         ),
     )
-    monkeypatch.setattr(ytmusic_client, "get_client_from_oauth", lambda token, credentials: object())
+    monkeypatch.setattr(
+        ytmusic_client,
+        "get_client_from_oauth",
+        lambda token, credentials: object(),
+    )
     monkeypatch.setattr(ytmusic_client, "get_channel_handle", lambda client: "@testuser")
 
     calls = []
@@ -98,7 +102,11 @@ def test_login_status_done_without_handle_does_not_create_user(monkeypatch, tmp_
             status="done", token=fake_token
         ),
     )
-    monkeypatch.setattr(ytmusic_client, "get_client_from_oauth", lambda token, credentials: object())
+    monkeypatch.setattr(
+        ytmusic_client,
+        "get_client_from_oauth",
+        lambda token, credentials: object(),
+    )
     monkeypatch.setattr(ytmusic_client, "get_channel_handle", lambda client: None)
 
     client = make_test_client()
