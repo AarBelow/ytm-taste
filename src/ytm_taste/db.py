@@ -9,29 +9,9 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
-        CREATE TABLE IF NOT EXISTS tracks (
-            video_id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            duration_seconds INTEGER,
-            first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS artists (
-            artist_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS track_artists (
-            video_id TEXT NOT NULL REFERENCES tracks(video_id),
-            artist_id TEXT NOT NULL REFERENCES artists(artist_id),
-            position INTEGER NOT NULL,
-            PRIMARY KEY (video_id, artist_id)
-        );
-
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel_handle TEXT UNIQUE NOT NULL,
+            channel_id TEXT UNIQUE NOT NULL,
             oauth_token TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
@@ -44,62 +24,50 @@ def init_db(conn: sqlite3.Connection) -> None:
             user_id INTEGER NOT NULL REFERENCES users(id)
         );
 
-        CREATE TABLE IF NOT EXISTS history_snapshot_entries (
+        CREATE TABLE IF NOT EXISTS liked_videos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sync_run_id INTEGER NOT NULL REFERENCES sync_runs(id),
-            video_id TEXT NOT NULL REFERENCES tracks(video_id),
-            position INTEGER NOT NULL,
-            played_bucket TEXT
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            video_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            channel_title TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS playlists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            playlist_id TEXT NOT NULL,
+            title TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS playlist_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            playlist_row_id INTEGER NOT NULL REFERENCES playlists(id),
+            video_id TEXT NOT NULL,
+            title TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            channel_id TEXT NOT NULL,
+            channel_title TEXT NOT NULL
         );
         """
     )
     conn.commit()
 
 
-def upsert_track(
-    conn: sqlite3.Connection,
-    video_id: str,
-    title: str,
-    duration_seconds: int | None,
-    now: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO tracks (video_id, title, duration_seconds, first_seen_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(video_id) DO UPDATE SET last_seen_at = excluded.last_seen_at
-        """,
-        (video_id, title, duration_seconds, now, now),
-    )
-
-
-def upsert_artist(conn: sqlite3.Connection, artist_id: str, name: str) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO artists (artist_id, name) VALUES (?, ?)",
-        (artist_id, name),
-    )
-
-
-def link_track_artist(
-    conn: sqlite3.Connection, video_id: str, artist_id: str, position: int
-) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO track_artists (video_id, artist_id, position) VALUES (?, ?, ?)",
-        (video_id, artist_id, position),
-    )
-
-
 def get_or_create_user(
-    conn: sqlite3.Connection, channel_handle: str, oauth_token_json: str, now: str
+    conn: sqlite3.Connection, channel_id: str, oauth_token_json: str, now: str
 ) -> int:
     existing = conn.execute(
-        "SELECT id FROM users WHERE channel_handle = ?", (channel_handle,)
+        "SELECT id FROM users WHERE channel_id = ?", (channel_id,)
     ).fetchone()
     if existing is not None:
         return existing[0]
     cur = conn.execute(
-        "INSERT INTO users (channel_handle, oauth_token, created_at) VALUES (?, ?, ?)",
-        (channel_handle, oauth_token_json, now),
+        "INSERT INTO users (channel_id, oauth_token, created_at) VALUES (?, ?, ?)",
+        (channel_id, oauth_token_json, now),
     )
     return cur.lastrowid
 
@@ -129,15 +97,46 @@ def finish_sync_run(
     )
 
 
-def record_history_entry(
-    conn: sqlite3.Connection,
-    sync_run_id: int,
-    video_id: str,
-    position: int,
-    played_bucket: str | None,
+def replace_liked_videos(conn: sqlite3.Connection, user_id: int, videos: list[dict]) -> None:
+    conn.execute("DELETE FROM liked_videos WHERE user_id = ?", (user_id,))
+    conn.executemany(
+        "INSERT INTO liked_videos (user_id, video_id, title, channel_title) VALUES (?, ?, ?, ?)",
+        [(user_id, v["video_id"], v["title"], v["channel_title"]) for v in videos],
+    )
+
+
+def replace_playlists(conn: sqlite3.Connection, user_id: int, playlists: list[dict]) -> None:
+    existing_ids = [
+        row[0]
+        for row in conn.execute(
+            "SELECT id FROM playlists WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    ]
+    if existing_ids:
+        conn.executemany(
+            "DELETE FROM playlist_items WHERE playlist_row_id = ?",
+            [(pid,) for pid in existing_ids],
+        )
+    conn.execute("DELETE FROM playlists WHERE user_id = ?", (user_id,))
+
+    for playlist in playlists:
+        cur = conn.execute(
+            "INSERT INTO playlists (user_id, playlist_id, title) VALUES (?, ?, ?)",
+            (user_id, playlist["playlist_id"], playlist["title"]),
+        )
+        playlist_row_id = cur.lastrowid
+        items = playlist.get("items", [])
+        conn.executemany(
+            "INSERT INTO playlist_items (playlist_row_id, video_id, title) VALUES (?, ?, ?)",
+            [(playlist_row_id, item["video_id"], item["title"]) for item in items],
+        )
+
+
+def replace_subscriptions(
+    conn: sqlite3.Connection, user_id: int, subscriptions: list[dict]
 ) -> None:
-    conn.execute(
-        "INSERT INTO history_snapshot_entries "
-        "(sync_run_id, video_id, position, played_bucket) VALUES (?, ?, ?, ?)",
-        (sync_run_id, video_id, position, played_bucket),
+    conn.execute("DELETE FROM subscriptions WHERE user_id = ?", (user_id,))
+    conn.executemany(
+        "INSERT INTO subscriptions (user_id, channel_id, channel_title) VALUES (?, ?, ?)",
+        [(user_id, s["channel_id"], s["channel_title"]) for s in subscriptions],
     )
