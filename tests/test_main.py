@@ -1,7 +1,7 @@
 # tests/test_main.py
 from fastapi.testclient import TestClient
 
-from ytm_taste import main, oauth_device_flow, ytmusic_client
+from ytm_taste import google_oauth, main, youtube_client
 
 
 def test_read_root():
@@ -11,107 +11,88 @@ def test_read_root():
     assert response.json() == {"status": "ok", "service": "ytm-taste"}
 
 
-def make_test_client():
-    main._pending_flows.clear()
-    return TestClient(main.app)
-
-
-def test_login_page_contains_flow_id_and_prefilled_link(monkeypatch):
+def test_login_redirects_to_google_and_stores_state(monkeypatch):
+    monkeypatch.setattr(google_oauth, "build_flow", lambda *a, **kw: object())
     monkeypatch.setattr(
-        oauth_device_flow,
-        "start_flow",
-        lambda credentials: oauth_device_flow.FlowState(
-            device_code="devcode1",
-            verification_url_complete="https://www.google.com/device?user_code=ABC-DEF",
-            interval=5,
-            expires_at=99999999999.0,
-        ),
+        google_oauth,
+        "get_authorization_url",
+        lambda flow: ("https://accounts.google.com/fake-auth-url", "fake-state"),
     )
-    client = make_test_client()
+    client = TestClient(main.app, follow_redirects=False)
     response = client.get("/login")
-    assert response.status_code == 200
-    assert "https://www.google.com/device?user_code=ABC-DEF" in response.text
-    assert len(main._pending_flows) == 1
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "https://accounts.google.com/fake-auth-url"
 
 
-def test_login_status_pending_does_not_set_session(monkeypatch):
+def test_auth_callback_rejects_mismatched_state(monkeypatch):
+    monkeypatch.setattr(google_oauth, "build_flow", lambda *a, **kw: object())
     monkeypatch.setattr(
-        oauth_device_flow,
-        "check_flow",
-        lambda credentials, device_code: oauth_device_flow.FlowResult(status="pending"),
+        google_oauth,
+        "get_authorization_url",
+        lambda flow: ("https://accounts.google.com/fake-auth-url", "expected-state"),
     )
-    client = make_test_client()
-    main._pending_flows["flow1"] = {"device_code": "devcode1", "expires_at": 99999999999.0}
+    client = TestClient(main.app, follow_redirects=False)
+    client.get("/login")
 
-    response = client.get("/login/status", params={"flow_id": "flow1"})
-    assert response.json() == {"status": "pending"}
-    assert "session" not in response.cookies
+    response = client.get("/auth/callback", params={"state": "wrong-state", "code": "abc"})
+    assert response.status_code == 400
 
 
-def test_login_status_done_creates_user_and_triggers_sync(monkeypatch, tmp_path):
+class FakeCredentials:
+    def to_json(self):
+        return '{"token": "fake"}'
+
+
+def test_auth_callback_creates_user_and_triggers_sync(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "DB_PATH", str(tmp_path / "test.db"))
-
-    fake_token = {"access_token": "tok", "refresh_token": "ref"}
+    monkeypatch.setattr(google_oauth, "build_flow", lambda *a, **kw: object())
     monkeypatch.setattr(
-        oauth_device_flow,
-        "check_flow",
-        lambda credentials, device_code: oauth_device_flow.FlowResult(
-            status="done", token=fake_token
-        ),
+        google_oauth,
+        "get_authorization_url",
+        lambda flow: ("https://accounts.google.com/fake-auth-url", "expected-state"),
     )
-    monkeypatch.setattr(
-        ytmusic_client,
-        "get_client_from_oauth",
-        lambda token, credentials: object(),
-    )
-    monkeypatch.setattr(ytmusic_client, "get_channel_handle", lambda client: "@testuser")
+    monkeypatch.setattr(google_oauth, "fetch_credentials", lambda flow, url: FakeCredentials())
+    monkeypatch.setattr(youtube_client, "build_youtube_client", lambda credentials: object())
+    monkeypatch.setattr(youtube_client, "get_channel_id", lambda youtube: "UC123")
 
     calls = []
 
-    def fake_run_sync(db_path, user_id, client, **kwargs):
+    def fake_run_sync(db_path, user_id, youtube, **kwargs):
         calls.append((db_path, user_id))
-        return {"items_fetched": 0, "new_tracks": 0, "elapsed_seconds": 0.0}
+        return {"liked_videos": 0, "playlists": 0, "subscriptions": 0, "elapsed_seconds": 0.0}
 
     monkeypatch.setattr(main.sync, "run_sync", fake_run_sync)
 
-    client = make_test_client()
-    main._pending_flows["flow1"] = {"device_code": "devcode1", "expires_at": 99999999999.0}
+    client = TestClient(main.app, follow_redirects=False)
+    client.get("/login")
 
-    response = client.get("/login/status", params={"flow_id": "flow1"})
-    body = response.json()
-    assert body == {"status": "done", "redirect": "/"}
-    assert "flow1" not in main._pending_flows
+    response = client.get("/auth/callback", params={"state": "expected-state", "code": "abc"})
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/"
     assert len(calls) == 1
     assert calls[0][0] == str(tmp_path / "test.db")
 
     from ytm_taste import db as db_module
 
     conn = db_module.get_connection(str(tmp_path / "test.db"))
-    row = conn.execute("SELECT channel_handle FROM users").fetchone()
-    assert row == ("@testuser",)
+    row = conn.execute("SELECT channel_id FROM users").fetchone()
+    assert row == ("UC123",)
 
 
-def test_login_status_done_without_handle_does_not_create_user(monkeypatch, tmp_path):
+def test_auth_callback_without_channel_does_not_create_user(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "DB_PATH", str(tmp_path / "test.db"))
-
-    fake_token = {"access_token": "tok", "refresh_token": "ref"}
+    monkeypatch.setattr(google_oauth, "build_flow", lambda *a, **kw: object())
     monkeypatch.setattr(
-        oauth_device_flow,
-        "check_flow",
-        lambda credentials, device_code: oauth_device_flow.FlowResult(
-            status="done", token=fake_token
-        ),
+        google_oauth,
+        "get_authorization_url",
+        lambda flow: ("https://accounts.google.com/fake-auth-url", "expected-state"),
     )
-    monkeypatch.setattr(
-        ytmusic_client,
-        "get_client_from_oauth",
-        lambda token, credentials: object(),
-    )
-    monkeypatch.setattr(ytmusic_client, "get_channel_handle", lambda client: None)
+    monkeypatch.setattr(google_oauth, "fetch_credentials", lambda flow, url: FakeCredentials())
+    monkeypatch.setattr(youtube_client, "build_youtube_client", lambda credentials: object())
+    monkeypatch.setattr(youtube_client, "get_channel_id", lambda youtube: None)
 
-    client = make_test_client()
-    main._pending_flows["flow1"] = {"device_code": "devcode1", "expires_at": 99999999999.0}
+    client = TestClient(main.app, follow_redirects=False)
+    client.get("/login")
 
-    response = client.get("/login/status", params={"flow_id": "flow1"})
-    body = response.json()
-    assert body["status"] == "error"
+    response = client.get("/auth/callback", params={"state": "expected-state", "code": "abc"})
+    assert response.status_code == 400
