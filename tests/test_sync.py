@@ -24,13 +24,22 @@ def fake_songs():
     ]
 
 
+def make_user(db_path, channel_handle):
+    conn = db.get_connection(db_path)
+    db.init_db(conn)
+    user_id = db.get_or_create_user(conn, channel_handle, "{}", "2026-07-10T00:00:00")
+    conn.commit()
+    return user_id
+
+
 def test_run_sync_saves_fetched_history_to_database(tmp_path):
     db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "@user1")
     summary = sync.run_sync(
         db_path,
-        "unused.json",
-        fetch_history_fn=lambda client: fake_songs(),
+        user_id,
         client=object(),
+        fetch_history_fn=lambda client: fake_songs(),
     )
     assert summary["items_fetched"] == 2
     assert summary["new_tracks"] == 2
@@ -45,11 +54,10 @@ def test_run_sync_saves_fetched_history_to_database(tmp_path):
 
 def test_run_sync_accumulates_across_two_runs(tmp_path):
     db_path = str(tmp_path / "test.db")
-    sync.run_sync(
-        db_path, "unused.json", fetch_history_fn=lambda client: fake_songs(), client=object()
-    )
+    user_id = make_user(db_path, "@user1")
+    sync.run_sync(db_path, user_id, client=object(), fetch_history_fn=lambda client: fake_songs())
     summary2 = sync.run_sync(
-        db_path, "unused.json", fetch_history_fn=lambda client: fake_songs(), client=object()
+        db_path, user_id, client=object(), fetch_history_fn=lambda client: fake_songs()
     )
     assert summary2["items_fetched"] == 2
     assert summary2["new_tracks"] == 0
@@ -66,11 +74,12 @@ def test_run_sync_accumulates_across_two_runs(tmp_path):
 
 def test_run_sync_skips_songs_without_video_id(tmp_path):
     db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "@user1")
     songs = fake_songs() + [
         {"videoId": None, "title": "Bad Song", "artists": [], "played": "Today"}
     ]
     summary = sync.run_sync(
-        db_path, "unused.json", fetch_history_fn=lambda client: songs, client=object()
+        db_path, user_id, client=object(), fetch_history_fn=lambda client: songs
     )
     assert summary["items_fetched"] == 3
     conn = db.get_connection(db_path)
@@ -78,15 +87,9 @@ def test_run_sync_skips_songs_without_video_id(tmp_path):
     assert count == 2
 
 
-def test_run_sync_raises_clear_error_when_auth_file_missing(tmp_path):
-    db_path = str(tmp_path / "test.db")
-    missing_auth = str(tmp_path / "missing.json")
-    with pytest.raises(RuntimeError, match="ytmusicapi browser"):
-        sync.run_sync(db_path, missing_auth)
-
-
 def test_run_sync_rolls_back_all_writes_on_mid_loop_failure(tmp_path):
     db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "@user1")
     songs_with_bad_second_entry = [
         fake_songs()[0],
         {"videoId": "v_bad", "title": None, "artists": [], "played": "Today"},
@@ -95,13 +98,46 @@ def test_run_sync_rolls_back_all_writes_on_mid_loop_failure(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         sync.run_sync(
             db_path,
-            "unused.json",
-            fetch_history_fn=lambda client: songs_with_bad_second_entry,
+            user_id,
             client=object(),
+            fetch_history_fn=lambda client: songs_with_bad_second_entry,
         )
 
     conn = db.get_connection(db_path)
     tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
     assert tracks == 0
-    sync_runs = conn.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0]
+    sync_runs = conn.execute(
+        "SELECT COUNT(*) FROM sync_runs WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
     assert sync_runs == 0
+
+
+def test_run_sync_keeps_different_users_history_separated(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user1 = make_user(db_path, "@user1")
+    user2 = make_user(db_path, "@user2")
+
+    sync.run_sync(db_path, user1, client=object(), fetch_history_fn=lambda client: fake_songs())
+    sync.run_sync(
+        db_path, user2, client=object(), fetch_history_fn=lambda client: [fake_songs()[0]]
+    )
+
+    conn = db.get_connection(db_path)
+    user1_runs = conn.execute("SELECT id FROM sync_runs WHERE user_id = ?", (user1,)).fetchall()
+    user2_runs = conn.execute("SELECT id FROM sync_runs WHERE user_id = ?", (user2,)).fetchall()
+    assert len(user1_runs) == 1
+    assert len(user2_runs) == 1
+
+    user1_entries = conn.execute(
+        "SELECT COUNT(*) FROM history_snapshot_entries WHERE sync_run_id = ?",
+        (user1_runs[0][0],),
+    ).fetchone()[0]
+    user2_entries = conn.execute(
+        "SELECT COUNT(*) FROM history_snapshot_entries WHERE sync_run_id = ?",
+        (user2_runs[0][0],),
+    ).fetchone()[0]
+    assert user1_entries == 2
+    assert user2_entries == 1
+
+    track_count = conn.execute("SELECT COUNT(*) FROM tracks WHERE video_id = 'v1'").fetchone()[0]
+    assert track_count == 1

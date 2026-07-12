@@ -6,20 +6,17 @@ from ytm_taste import db, ytmusic_client
 
 def run_sync(
     db_path: str,
-    auth_file_path: str,
+    user_id: int,
+    client,
     fetch_history_fn=ytmusic_client.fetch_history,
-    client=None,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
     db.init_db(conn)
 
-    if client is None:
-        client = ytmusic_client.get_client(auth_file_path)
-
     try:
         now = datetime.now(timezone.utc).isoformat()
-        sync_run_id = db.start_sync_run(conn, now)
+        sync_run_id = db.start_sync_run(conn, now, user_id)
 
         songs = fetch_history_fn(client)
 
@@ -61,11 +58,3 @@ def run_sync(
         f"({summary['new_tracks']} new tracks) in {summary['elapsed_seconds']:.1f}s"
     )
     return summary
-
-
-if __name__ == "__main__":
-    try:
-        run_sync("data/ytm_taste.db", "ytmusic_auth.json")
-    except RuntimeError as e:
-        print(f"Sync failed: {e}")
-        raise SystemExit(1)
