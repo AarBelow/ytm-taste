@@ -1,143 +1,177 @@
-import sqlite3
-
 import pytest
 
 from ytm_taste import db, sync
 
 
-def fake_songs():
-    return [
-        {
-            "videoId": "v1",
-            "title": "Song One",
-            "duration_seconds": 200,
-            "artists": [{"id": "a1", "name": "Artist One"}],
-            "played": "Today",
-        },
-        {
-            "videoId": "v2",
-            "title": "Song Two",
-            "duration_seconds": 210,
-            "artists": [{"id": None, "name": "Artist Two"}],
-            "played": "Yesterday",
-        },
-    ]
+def fake_liked_videos(youtube):
+    return [{"video_id": "v1", "title": "Song One", "channel_title": "Artist One"}]
 
 
-def make_user(db_path, channel_handle):
+def fake_playlists(youtube):
+    return [{"playlist_id": "PL1", "title": "My Mix"}]
+
+
+def fake_playlist_items(youtube, playlist_id):
+    return [{"video_id": "v2", "title": "Song Two"}]
+
+
+def fake_subscriptions(youtube):
+    return [{"channel_id": "UC1", "channel_title": "Some Artist"}]
+
+
+def make_user(db_path, channel_id):
     conn = db.get_connection(db_path)
     db.init_db(conn)
-    user_id = db.get_or_create_user(conn, channel_handle, "{}", "2026-07-10T00:00:00")
+    user_id = db.get_or_create_user(conn, channel_id, "{}", "2026-07-13T00:00:00")
     conn.commit()
     return user_id
 
 
-def test_run_sync_saves_fetched_history_to_database(tmp_path):
+def test_run_sync_saves_all_four_data_types(tmp_path):
     db_path = str(tmp_path / "test.db")
-    user_id = make_user(db_path, "@user1")
+    user_id = make_user(db_path, "UC_user1")
     summary = sync.run_sync(
         db_path,
         user_id,
-        client=object(),
-        fetch_history_fn=lambda client: fake_songs(),
+        youtube=object(),
+        fetch_liked_videos_fn=fake_liked_videos,
+        fetch_playlists_fn=fake_playlists,
+        fetch_playlist_items_fn=fake_playlist_items,
+        fetch_subscriptions_fn=fake_subscriptions,
     )
-    assert summary["items_fetched"] == 2
-    assert summary["new_tracks"] == 2
+    assert summary["liked_videos"] == 1
+    assert summary["playlists"] == 1
+    assert summary["subscriptions"] == 1
 
     conn = db.get_connection(db_path)
-    tracks = conn.execute("SELECT video_id, title FROM tracks ORDER BY video_id").fetchall()
-    assert tracks == [("v1", "Song One"), ("v2", "Song Two")]
+    liked = conn.execute(
+        "SELECT video_id FROM liked_videos WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    assert liked == [("v1",)]
 
-    artists = conn.execute("SELECT artist_id, name FROM artists ORDER BY artist_id").fetchall()
-    assert artists == [("a1", "Artist One"), ("noid:Artist Two", "Artist Two")]
+    playlist_items = conn.execute(
+        "SELECT pi.video_id FROM playlist_items pi "
+        "JOIN playlists p ON p.id = pi.playlist_row_id WHERE p.user_id = ?",
+        (user_id,),
+    ).fetchall()
+    assert playlist_items == [("v2",)]
+
+    subs = conn.execute(
+        "SELECT channel_id FROM subscriptions WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    assert subs == [("UC1",)]
 
 
-def test_run_sync_accumulates_across_two_runs(tmp_path):
+def test_run_sync_replaces_not_accumulates_on_second_run(tmp_path):
     db_path = str(tmp_path / "test.db")
-    user_id = make_user(db_path, "@user1")
-    sync.run_sync(db_path, user_id, client=object(), fetch_history_fn=lambda client: fake_songs())
-    summary2 = sync.run_sync(
-        db_path, user_id, client=object(), fetch_history_fn=lambda client: fake_songs()
+    user_id = make_user(db_path, "UC_user1")
+
+    def fetch_liked_v1(youtube):
+        return [{"video_id": "v1", "title": "Song One", "channel_title": "Artist One"}]
+
+    def fetch_liked_v2(youtube):
+        return [{"video_id": "v2", "title": "Song Two", "channel_title": "Artist Two"}]
+
+    def no_playlists(youtube):
+        return []
+
+    def no_subs(youtube):
+        return []
+
+    sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=fetch_liked_v1,
+        fetch_playlists_fn=no_playlists,
+        fetch_playlist_items_fn=fake_playlist_items,
+        fetch_subscriptions_fn=no_subs,
     )
-    assert summary2["items_fetched"] == 2
-    assert summary2["new_tracks"] == 0
+    sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=fetch_liked_v2,
+        fetch_playlists_fn=no_playlists,
+        fetch_playlist_items_fn=fake_playlist_items,
+        fetch_subscriptions_fn=no_subs,
+    )
 
     conn = db.get_connection(db_path)
-    entries = conn.execute("SELECT COUNT(*) FROM history_snapshot_entries").fetchone()[0]
-    assert entries == 4
-
-    runs = conn.execute(
-        "SELECT COUNT(*) FROM sync_runs WHERE finished_at IS NOT NULL"
-    ).fetchone()[0]
-    assert runs == 2
+    videos = conn.execute(
+        "SELECT video_id FROM liked_videos WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    assert videos == [("v2",)]
 
 
-def test_run_sync_skips_songs_without_video_id(tmp_path):
+def test_run_sync_rolls_back_all_writes_on_failure(tmp_path):
     db_path = str(tmp_path / "test.db")
-    user_id = make_user(db_path, "@user1")
-    songs = fake_songs() + [
-        {"videoId": None, "title": "Bad Song", "artists": [], "played": "Today"}
-    ]
-    summary = sync.run_sync(
-        db_path, user_id, client=object(), fetch_history_fn=lambda client: songs
-    )
-    assert summary["items_fetched"] == 3
-    conn = db.get_connection(db_path)
-    count = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    assert count == 2
+    user_id = make_user(db_path, "UC_user1")
 
+    def failing_fetch(youtube):
+        raise ValueError("boom")
 
-def test_run_sync_rolls_back_all_writes_on_mid_loop_failure(tmp_path):
-    db_path = str(tmp_path / "test.db")
-    user_id = make_user(db_path, "@user1")
-    songs_with_bad_second_entry = [
-        fake_songs()[0],
-        {"videoId": "v_bad", "title": None, "artists": [], "played": "Today"},
-    ]
-
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ValueError):
         sync.run_sync(
             db_path,
             user_id,
-            client=object(),
-            fetch_history_fn=lambda client: songs_with_bad_second_entry,
+            youtube=object(),
+            fetch_liked_videos_fn=fake_liked_videos,
+            fetch_playlists_fn=failing_fetch,
+            fetch_playlist_items_fn=fake_playlist_items,
+            fetch_subscriptions_fn=fake_subscriptions,
         )
 
     conn = db.get_connection(db_path)
-    tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    assert tracks == 0
-    sync_runs = conn.execute(
+    count = conn.execute(
+        "SELECT COUNT(*) FROM liked_videos WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    assert count == 0
+    runs = conn.execute(
         "SELECT COUNT(*) FROM sync_runs WHERE user_id = ?", (user_id,)
     ).fetchone()[0]
-    assert sync_runs == 0
+    assert runs == 0
 
 
-def test_run_sync_keeps_different_users_history_separated(tmp_path):
+def test_run_sync_keeps_different_users_data_separated(tmp_path):
     db_path = str(tmp_path / "test.db")
-    user1 = make_user(db_path, "@user1")
-    user2 = make_user(db_path, "@user2")
+    user1 = make_user(db_path, "UC_user1")
+    user2 = make_user(db_path, "UC_user2")
 
-    sync.run_sync(db_path, user1, client=object(), fetch_history_fn=lambda client: fake_songs())
+    def no_playlists(youtube):
+        return []
+
+    def no_subs(youtube):
+        return []
+
+    def no_liked(youtube):
+        return []
+
     sync.run_sync(
-        db_path, user2, client=object(), fetch_history_fn=lambda client: [fake_songs()[0]]
+        db_path,
+        user1,
+        youtube=object(),
+        fetch_liked_videos_fn=fake_liked_videos,
+        fetch_playlists_fn=no_playlists,
+        fetch_playlist_items_fn=fake_playlist_items,
+        fetch_subscriptions_fn=no_subs,
+    )
+    sync.run_sync(
+        db_path,
+        user2,
+        youtube=object(),
+        fetch_liked_videos_fn=no_liked,
+        fetch_playlists_fn=no_playlists,
+        fetch_playlist_items_fn=fake_playlist_items,
+        fetch_subscriptions_fn=no_subs,
     )
 
     conn = db.get_connection(db_path)
-    user1_runs = conn.execute("SELECT id FROM sync_runs WHERE user_id = ?", (user1,)).fetchall()
-    user2_runs = conn.execute("SELECT id FROM sync_runs WHERE user_id = ?", (user2,)).fetchall()
-    assert len(user1_runs) == 1
-    assert len(user2_runs) == 1
-
-    user1_entries = conn.execute(
-        "SELECT COUNT(*) FROM history_snapshot_entries WHERE sync_run_id = ?",
-        (user1_runs[0][0],),
+    user1_videos = conn.execute(
+        "SELECT COUNT(*) FROM liked_videos WHERE user_id = ?", (user1,)
     ).fetchone()[0]
-    user2_entries = conn.execute(
-        "SELECT COUNT(*) FROM history_snapshot_entries WHERE sync_run_id = ?",
-        (user2_runs[0][0],),
+    user2_videos = conn.execute(
+        "SELECT COUNT(*) FROM liked_videos WHERE user_id = ?", (user2,)
     ).fetchone()[0]
-    assert user1_entries == 2
-    assert user2_entries == 1
-
-    track_count = conn.execute("SELECT COUNT(*) FROM tracks WHERE video_id = 'v1'").fetchone()[0]
-    assert track_count == 1
+    assert user1_videos == 1
+    assert user2_videos == 0
