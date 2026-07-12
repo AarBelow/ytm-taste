@@ -35,24 +35,37 @@ FastAPI + HTML/JS web app you open in your browser.
    pytest
    ```
 
-## Fetching Your Listening History
+## Logging In and Syncing Your Listening History
 
-One-time setup — generate a YouTube Music auth file (requires pasting request
-headers copied from your browser while logged into music.youtube.com; this
-step is interactive and must be run by you, not automated):
-```
-ytmusicapi browser --file ytmusic_auth.json
-```
+This app uses Google login (YouTube Music's own OAuth device flow) instead
+of manually copying browser headers, and supports multiple people each
+syncing their own separate listening history.
 
-Then, whenever you want to pull your latest listening history into the
-database:
-```
-python -m ytm_taste.sync
-```
+One-time setup, done once by whoever runs this app:
 
-Each run adds new observations to `data/ytm_taste.db` without erasing
-anything already stored — safe to run repeatedly (e.g. weekly) to build up
-history over time.
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a
+   project (or reuse one), enable the "YouTube Data API v3", then create
+   OAuth credentials of type **"TVs and Limited Input devices"**. Copy the
+   resulting Client ID and Client Secret.
+2. Copy `.env.example` to `.env` and fill in:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=<your client id>
+   GOOGLE_OAUTH_CLIENT_SECRET=<your client secret>
+   SECRET_KEY=<any random string, used to sign login session cookies>
+   ```
+3. In that same OAuth client's consent screen, add each person's Google
+   account email as a **test user** before they can log in — required
+   while the app is unverified (fine for a handful of friends; capped at
+   100 test users total).
+
+Then run the server:
+```
+uvicorn ytm_taste.main:app --app-dir src --reload
+```
+Visit http://127.0.0.1:8000/login, click through to Google, and approve
+access — your listening history starts syncing automatically in the
+background. Revisiting `/login` later re-syncs your data without creating
+a duplicate account.
 
 ## Roadmap
 
