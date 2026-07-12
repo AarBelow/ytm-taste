@@ -1,3 +1,4 @@
+# src/ytm_taste/db.py
 import sqlite3
 
 
@@ -28,11 +29,19 @@ def init_db(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (video_id, artist_id)
         );
 
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_handle TEXT UNIQUE NOT NULL,
+            oauth_token TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS sync_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             started_at TEXT NOT NULL,
             finished_at TEXT,
-            items_fetched INTEGER
+            items_fetched INTEGER,
+            user_id INTEGER NOT NULL REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS history_snapshot_entries (
@@ -80,8 +89,34 @@ def link_track_artist(
     )
 
 
-def start_sync_run(conn: sqlite3.Connection, started_at: str) -> int:
-    cur = conn.execute("INSERT INTO sync_runs (started_at) VALUES (?)", (started_at,))
+def get_or_create_user(
+    conn: sqlite3.Connection, channel_handle: str, oauth_token_json: str, now: str
+) -> int:
+    existing = conn.execute(
+        "SELECT id FROM users WHERE channel_handle = ?", (channel_handle,)
+    ).fetchone()
+    if existing is not None:
+        return existing[0]
+    cur = conn.execute(
+        "INSERT INTO users (channel_handle, oauth_token, created_at) VALUES (?, ?, ?)",
+        (channel_handle, oauth_token_json, now),
+    )
+    return cur.lastrowid
+
+
+def get_user_oauth_token(conn: sqlite3.Connection, user_id: int) -> str:
+    row = conn.execute("SELECT oauth_token FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row[0]
+
+
+def update_user_oauth_token(conn: sqlite3.Connection, user_id: int, oauth_token_json: str) -> None:
+    conn.execute("UPDATE users SET oauth_token = ? WHERE id = ?", (oauth_token_json, user_id))
+
+
+def start_sync_run(conn: sqlite3.Connection, started_at: str, user_id: int) -> int:
+    cur = conn.execute(
+        "INSERT INTO sync_runs (started_at, user_id) VALUES (?, ?)", (started_at, user_id)
+    )
     return cur.lastrowid
 
 
