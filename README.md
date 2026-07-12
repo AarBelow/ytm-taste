@@ -22,10 +22,11 @@ FastAPI + HTML/JS web app you open in your browser.
    ```
    pip install -r requirements.txt
    ```
-4. Copy `.env.example` to `.env` and fill in your Last.fm API credentials:
+4. Copy `.env.example` to `.env`:
    ```
    copy .env.example .env
    ```
+   See "Logging In and Syncing Your YouTube Data" below for which fields to fill in.
 5. Run the server:
    ```
    uvicorn ytm_taste.main:app --app-dir src --reload

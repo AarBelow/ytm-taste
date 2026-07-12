@@ -11,6 +11,12 @@ from ytm_taste import db, google_oauth, sync, youtube_client
 
 load_dotenv()
 
+# This app's redirect URI is plain HTTP (http://127.0.0.1:8000/auth/callback)
+# since it's local-only by design (no deployment/hosting this cycle). Google's
+# oauthlib refuses to process a non-HTTPS authorization_response URL unless
+# this is set — the standard, documented approach for local OAuth development.
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+
 app = FastAPI(title="ytm-taste")
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SECRET_KEY"])
 
@@ -45,6 +51,7 @@ def auth_callback(request: Request, background_tasks: BackgroundTasks):
     state = request.query_params.get("state")
     if state is None or state != request.session.get("oauth_state"):
         return HTMLResponse("Login failed: invalid or expired login attempt.", status_code=400)
+    request.session.pop("oauth_state", None)
 
     flow = _build_flow()
     credentials = google_oauth.fetch_credentials(flow, str(request.url))
