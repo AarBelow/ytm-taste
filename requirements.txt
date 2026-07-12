@@ -1,4 +1,3 @@
-ytmusicapi
 fastapi
 uvicorn[standard]
 requests
