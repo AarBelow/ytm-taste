@@ -223,3 +223,6 @@ data/*
 
 # ytm-taste auth
 ytmusic_auth.json
+
+# Local planning/design notes (kept locally, not published)
+docs/superpowers/
