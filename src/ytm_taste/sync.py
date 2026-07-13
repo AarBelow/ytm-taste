@@ -1,7 +1,9 @@
 import time
 from datetime import datetime, timezone
 
-from ytm_taste import db, youtube_client
+from ytm_taste import db, lastfm_client, recommendations, youtube_client
+
+RATE_LIMIT_DELAY = 0.25
 
 
 def run_sync(
@@ -13,6 +15,9 @@ def run_sync(
     fetch_playlist_items_fn=youtube_client.fetch_playlist_items,
     fetch_subscriptions_fn=youtube_client.fetch_subscriptions,
     fetch_video_details_fn=youtube_client.fetch_video_details,
+    lastfm_api_key=None,
+    fetch_similar_fn=lastfm_client.fetch_similar_tracks,
+    sleep_fn=time.sleep,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -50,15 +55,36 @@ def run_sync(
         conn.rollback()
         raise
 
+    recommendation_count = 0
+    if lastfm_api_key:
+        try:
+            clean = db.get_clean_seed_songs(conn, user_id)
+            top = db.get_top_artists(conn, user_id)
+            seeds = recommendations.select_seeds(clean, top)
+            similar_by_seed = []
+            for artist, track in seeds:
+                similar_by_seed.append(fetch_similar_fn(lastfm_api_key, artist, track))
+                sleep_fn(RATE_LIMIT_DELAY)
+            owned = db.get_owned_song_keys(conn, user_id)
+            recs = recommendations.rank(similar_by_seed, owned)
+            db.replace_recommendations(conn, user_id, recs)
+            conn.commit()
+            recommendation_count = len(recs)
+        except Exception as exc:  # best-effort: never affects committed YouTube data
+            conn.rollback()
+            print(f"Recommendation generation failed (skipped): {exc}")
+
     elapsed = time.monotonic() - start
     summary = {
         "liked_videos": len(liked_videos),
         "playlists": len(playlists),
         "subscriptions": len(subscriptions),
+        "recommendations": recommendation_count,
         "elapsed_seconds": elapsed,
     }
     print(
         f"Synced {summary['liked_videos']} liked videos, {summary['playlists']} playlists, "
-        f"{summary['subscriptions']} subscriptions in {summary['elapsed_seconds']:.1f}s"
+        f"{summary['subscriptions']} subscriptions, {summary['recommendations']} recommendations "
+        f"in {summary['elapsed_seconds']:.1f}s"
     )
     return summary

@@ -247,3 +247,98 @@ def test_run_sync_stores_none_when_video_details_missing(tmp_path):
         "SELECT video_id, channel_title, category_id FROM playlist_items"
     ).fetchone()
     assert row == ("v_deleted", None, None)
+
+
+def test_run_sync_generates_and_stores_recommendations(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def liked(youtube):
+        return [{"video_id": "v1", "title": "Seed Song", "channel_title": "Alpha - Topic"}]
+
+    similar_calls = []
+
+    def fetch_similar(api_key, artist, track):
+        similar_calls.append((api_key, artist, track))
+        return [{"artist": "New Artist", "track": "New Song", "match": 0.9}]
+
+    sleeps = []
+    summary = sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=liked,
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=fetch_similar,
+        sleep_fn=lambda s: sleeps.append(s),
+    )
+    assert summary["recommendations"] == 1
+    assert similar_calls == [("KEY", "Alpha", "Seed Song")]
+
+    conn = db.get_connection(db_path)
+    recs = conn.execute(
+        "SELECT artist, track FROM recommendations WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    assert recs == [("New Artist", "New Song")]
+
+
+def test_run_sync_skips_recommendations_without_api_key(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    calls = []
+    summary = sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v1", "title": "S", "channel_title": "Alpha - Topic"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key=None,
+        fetch_similar_fn=lambda *a: calls.append(a) or [],
+    )
+    assert summary["recommendations"] == 0
+    assert calls == []
+
+
+def test_run_sync_lastfm_failure_does_not_roll_back_youtube_data(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def boom(api_key, artist, track):
+        raise RuntimeError("last.fm down")
+
+    summary = sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v1", "title": "S", "channel_title": "Alpha - Topic"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=boom,
+        sleep_fn=lambda s: None,
+    )
+    assert summary["liked_videos"] == 1
+    assert summary["recommendations"] == 0
+    conn = db.get_connection(db_path)
+    liked = conn.execute(
+        "SELECT COUNT(*) FROM liked_videos WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    assert liked == 1
+    recs = conn.execute(
+        "SELECT COUNT(*) FROM recommendations WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    assert recs == 0
