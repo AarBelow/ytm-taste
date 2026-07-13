@@ -72,12 +72,16 @@ def test_fetch_similar_tracks_empty_or_malformed_returns_empty_list():
     )
 
 
-def test_fetch_artist_info_parses_genre_bio_listeners():
+def test_fetch_artist_info_skips_junk_tags_and_returns_full_bio():
     data = {
         "artist": {
             "stats": {"listeners": "741785"},
-            "bio": {"summary": 'Potsu is a Lo-Fi producer. <a href="x">Read more on Last.fm</a>'},
-            "tags": {"tag": [{"name": "Lo-Fi"}, {"name": "chill"}]},
+            "bio": {
+                "content": "Potsu is a Lo-Fi producer. A longer full bio. "
+                '<a href="x">Read more on Last.fm</a>'
+            },
+            # "text" is junk, "canadian" is geographic; "Lo-Fi" is the first real genre
+            "tags": {"tag": [{"name": "text"}, {"name": "canadian"}, {"name": "Lo-Fi"}]},
         }
     }
     result = lastfm_client.fetch_artist_info("KEY", "potsu", get_fn=make_get(data, []))
@@ -85,7 +89,19 @@ def test_fetch_artist_info_parses_genre_bio_listeners():
     assert result["listeners"] == 741785
     assert "Read more on Last.fm" not in result["bio"]
     assert "<a" not in result["bio"]
-    assert result["bio"].startswith("Potsu is a Lo-Fi producer.")
+    # full bio, not truncated mid-sentence
+    assert result["bio"] == "Potsu is a Lo-Fi producer. A longer full bio."
+
+
+def test_fetch_artist_info_genre_none_when_no_genre_tag():
+    data = {
+        "artist": {
+            "stats": {"listeners": "1"},
+            "bio": {"content": "x"},
+            "tags": {"tag": [{"name": "text"}, {"name": "seen live"}]},
+        }
+    }
+    assert lastfm_client.fetch_artist_info("K", "x", get_fn=make_get(data, []))["genre"] is None
 
 
 def test_fetch_artist_info_none_when_missing():

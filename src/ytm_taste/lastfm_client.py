@@ -3,6 +3,8 @@ import re
 
 import requests
 
+from ytm_taste.genres import GENRES
+
 API_URL = "http://ws.audioscrobbler.com/2.0/"
 
 
@@ -41,13 +43,18 @@ def fetch_similar_tracks(api_key, artist, track, limit=50, get_fn=requests.get) 
     return result
 
 
-def _clean_bio(summary: str, limit: int = 220) -> str:
-    text = re.sub(r"<[^>]+>", "", summary or "")
-    text = text.replace("Read more on Last.fm", "").strip()
-    if len(text) > limit:
-        cut = text[:limit].rsplit(" ", 1)[0].rstrip(".,;: ")
-        text = cut + "…"
-    return text
+def _clean_bio(text: str) -> str:
+    text = re.sub(r"<[^>]+>", "", text or "")
+    return text.split("Read more on Last.fm")[0].strip()
+
+
+def _pick_genre(tags) -> str | None:
+    # Pick the first tag that is a real music genre, skipping junk/geographic tags.
+    for t in tags:
+        name = t.get("name") if isinstance(t, dict) else None
+        if name and name.lower() in GENRES:
+            return name
+    return None
 
 
 def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
@@ -68,8 +75,9 @@ def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
     tags = a.get("tags", {}).get("tag", [])
     if isinstance(tags, dict):
         tags = [tags]
-    genre = tags[0]["name"] if tags else None
-    bio = _clean_bio(a.get("bio", {}).get("summary", "")) or None
+    genre = _pick_genre(tags)
+    bio_raw = a.get("bio", {}).get("content") or a.get("bio", {}).get("summary", "")
+    bio = _clean_bio(bio_raw) or None
     listeners_raw = a.get("stats", {}).get("listeners")
     try:
         listeners = int(listeners_raw) if listeners_raw is not None else None
