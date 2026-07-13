@@ -64,7 +64,12 @@ def test_fetch_liked_videos_filters_to_music_category_only():
         "items": [
             {
                 "id": "v1",
-                "snippet": {"title": "Song One", "channelTitle": "Artist One", "categoryId": "10"},
+                "snippet": {
+                    "title": "Song One",
+                    "channelTitle": "Artist One",
+                    "channelId": "UC1",
+                    "categoryId": "10",
+                },
             },
             {
                 "id": "v2",
@@ -74,7 +79,9 @@ def test_fetch_liked_videos_filters_to_music_category_only():
     }
     youtube = FakeYoutube(videos=FakeResource({None: response}))
     result = youtube_client.fetch_liked_videos(youtube)
-    assert result == [{"video_id": "v1", "title": "Song One", "channel_title": "Artist One"}]
+    assert result == [
+        {"video_id": "v1", "title": "Song One", "channel_title": "Artist One", "channel_id": "UC1"}
+    ]
 
 
 def test_fetch_liked_videos_paginates_across_multiple_pages():
@@ -141,7 +148,11 @@ class FakeVideosResource:
 def _video_item(video_id, channel_title, category_id):
     return {
         "id": video_id,
-        "snippet": {"channelTitle": channel_title, "categoryId": category_id},
+        "snippet": {
+            "channelTitle": channel_title,
+            "channelId": "UC" + video_id,
+            "categoryId": category_id,
+        },
     }
 
 
@@ -154,8 +165,8 @@ def test_fetch_video_details_returns_channel_and_category_map():
     )
     result = youtube_client.fetch_video_details(youtube, ["v1", "v2"])
     assert result == {
-        "v1": {"channel_title": "Artist One", "category_id": "10"},
-        "v2": {"channel_title": "Some Vlogger", "category_id": "22"},
+        "v1": {"channel_title": "Artist One", "category_id": "10", "channel_id": "UCv1"},
+        "v2": {"channel_title": "Some Vlogger", "category_id": "22", "channel_id": "UCv2"},
     }
 
 
@@ -180,4 +191,34 @@ def test_fetch_video_details_batches_in_groups_of_50():
 def test_fetch_video_details_omits_ids_with_no_item():
     youtube = FakeVideosResource({"v1": _video_item("v1", "Artist One", "10")})
     result = youtube_client.fetch_video_details(youtube, ["v1", "missing"])
-    assert result == {"v1": {"channel_title": "Artist One", "category_id": "10"}}
+    assert result == {
+        "v1": {"channel_title": "Artist One", "category_id": "10", "channel_id": "UCv1"}
+    }
+
+
+class FakeChannelsResource:
+    def __init__(self, items_by_id):
+        self._items = items_by_id
+        self.id_args = []
+
+    def channels(self):
+        return self
+
+    def list(self, **kwargs):
+        self.id_args.append(kwargs["id"])
+        ids = kwargs["id"].split(",")
+        return FakeRequest({"items": [self._items[i] for i in ids if i in self._items]})
+
+
+def test_fetch_channel_avatars_maps_id_to_thumbnail():
+    items = {
+        "UC1": {"id": "UC1", "snippet": {"thumbnails": {"default": {"url": "http://a/1.jpg"}}}},
+    }
+    youtube = FakeChannelsResource(items)
+    assert youtube_client.fetch_channel_avatars(youtube, ["UC1"]) == {"UC1": "http://a/1.jpg"}
+
+
+def test_fetch_channel_avatars_empty_list_no_call():
+    youtube = FakeChannelsResource({})
+    assert youtube_client.fetch_channel_avatars(youtube, []) == {}
+    assert youtube.id_args == []

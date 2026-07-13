@@ -34,6 +34,7 @@ def fetch_liked_videos(youtube) -> list[dict]:
                     "video_id": item["id"],
                     "title": snippet["title"],
                     "channel_title": snippet["channelTitle"],
+                    "channel_id": snippet.get("channelId"),
                 }
             )
         page_token = response.get("nextPageToken")
@@ -113,5 +114,18 @@ def fetch_video_details(youtube, video_ids: list[str]) -> dict[str, dict]:
             details[item["id"]] = {
                 "channel_title": snippet.get("channelTitle"),
                 "category_id": snippet.get("categoryId"),
+                "channel_id": snippet.get("channelId"),
             }
     return details
+
+
+def fetch_channel_avatars(youtube, channel_ids) -> dict[str, str]:
+    avatars: dict[str, str] = {}
+    for start in range(0, len(channel_ids), 50):
+        batch = channel_ids[start : start + 50]
+        response = youtube.channels().list(part="snippet", id=",".join(batch)).execute()
+        for item in response.get("items", []):
+            thumb = item.get("snippet", {}).get("thumbnails", {}).get("default", {}).get("url")
+            if thumb:
+                avatars[item["id"]] = thumb
+    return avatars
