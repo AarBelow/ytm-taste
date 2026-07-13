@@ -169,3 +169,92 @@ def test_get_top_artists_empty_for_user_with_no_liked_videos():
     conn = make_conn()
     user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     assert db.get_top_artists(conn, user_id) == []
+
+
+def test_normalize_artist_strips_topic_suffix():
+    assert db.normalize_artist("AZALI - Topic") == "AZALI"
+    assert db.normalize_artist("AZALI") == "AZALI"
+    assert db.normalize_artist("A - Topic B") == "A - Topic B"
+
+
+def _add_music_playlist(conn, user_id, title, items):
+    """items: list of (video_id, item_title, channel_title, category_id)."""
+    db.replace_playlists(
+        conn,
+        user_id,
+        [
+            {
+                "playlist_id": "PL_" + title,
+                "title": title,
+                "items": [
+                    {
+                        "video_id": vid,
+                        "title": it,
+                        "channel_title": ch,
+                        "category_id": cat,
+                    }
+                    for (vid, it, ch, cat) in items
+                ],
+            }
+        ],
+    )
+
+
+def test_replace_playlists_round_trips_channel_and_category():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    _add_music_playlist(
+        conn, user_id, "Mix", [("v1", "s1", "Alpha - Topic", "10"), ("v2", "s2", None, None)]
+    )
+    rows = conn.execute(
+        "SELECT video_id, channel_title, category_id FROM playlist_items ORDER BY video_id"
+    ).fetchall()
+    assert rows == [("v1", "Alpha - Topic", "10"), ("v2", None, None)]
+
+
+def test_get_top_artists_combines_liked_and_music_playlist_and_normalizes():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        user_id,
+        [
+            {"video_id": "v1", "title": "s1", "channel_title": "AZALI - Topic"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Beta"},
+        ],
+    )
+    _add_music_playlist(
+        conn,
+        user_id,
+        "Mix",
+        [
+            ("v3", "s3", "AZALI", "10"),
+            ("v4", "s4", "Beta", "10"),
+            ("v5", "s5", "Some Vlogger", "22"),
+        ],
+    )
+    assert db.get_top_artists(conn, user_id) == [("AZALI", 2), ("Beta", 2)]
+
+
+def test_get_top_artists_counts_each_occurrence():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Gamma"}]
+    )
+    _add_music_playlist(
+        conn,
+        user_id,
+        "Mix",
+        [("v2", "s2", "Gamma", "10"), ("v3", "s3", "Gamma", "10")],
+    )
+    assert db.get_top_artists(conn, user_id) == [("Gamma", 3)]
+
+
+def test_get_top_artists_playlist_songs_stay_per_user():
+    conn = make_conn()
+    user1 = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    user2 = db.get_or_create_user(conn, "UC_user2", "{}", "2026-07-13T00:00:00")
+    _add_music_playlist(conn, user1, "Mix1", [("v1", "s1", "Alpha", "10")])
+    _add_music_playlist(conn, user2, "Mix2", [("v2", "s2", "Alpha", "10")])
+    assert db.get_top_artists(conn, user1) == [("Alpha", 1)]

@@ -1,5 +1,6 @@
 # src/ytm_taste/db.py
 import sqlite3
+from collections import Counter
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -43,7 +44,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             playlist_row_id INTEGER NOT NULL REFERENCES playlists(id),
             video_id TEXT NOT NULL,
-            title TEXT NOT NULL
+            title TEXT NOT NULL,
+            channel_title TEXT,
+            category_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS subscriptions (
@@ -127,8 +130,19 @@ def replace_playlists(conn: sqlite3.Connection, user_id: int, playlists: list[di
         playlist_row_id = cur.lastrowid
         items = playlist.get("items", [])
         conn.executemany(
-            "INSERT INTO playlist_items (playlist_row_id, video_id, title) VALUES (?, ?, ?)",
-            [(playlist_row_id, item["video_id"], item["title"]) for item in items],
+            "INSERT INTO playlist_items "
+            "(playlist_row_id, video_id, title, channel_title, category_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                (
+                    playlist_row_id,
+                    item["video_id"],
+                    item["title"],
+                    item.get("channel_title"),
+                    item.get("category_id"),
+                )
+                for item in items
+            ],
         )
 
 
@@ -142,15 +156,28 @@ def replace_subscriptions(
     )
 
 
+def normalize_artist(name: str) -> str:
+    suffix = " - Topic"
+    if name.endswith(suffix):
+        return name[: -len(suffix)]
+    return name
+
+
 def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, int]]:
     rows = conn.execute(
         """
-        SELECT channel_title, COUNT(*) AS liked_count
-        FROM liked_videos
-        WHERE user_id = ?
-        GROUP BY channel_title
-        ORDER BY liked_count DESC, channel_title ASC
+        SELECT channel_title FROM liked_videos WHERE user_id = ?
+        UNION ALL
+        SELECT pi.channel_title
+        FROM playlist_items pi
+        JOIN playlists p ON p.id = pi.playlist_row_id
+        WHERE p.user_id = ? AND pi.category_id = '10'
         """,
-        (user_id,),
+        (user_id, user_id),
     ).fetchall()
-    return [(row[0], row[1]) for row in rows]
+    counts: Counter = Counter()
+    for (channel_title,) in rows:
+        if channel_title is None:
+            continue
+        counts[normalize_artist(channel_title)] += 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
