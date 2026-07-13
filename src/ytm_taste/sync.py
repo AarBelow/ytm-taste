@@ -1,9 +1,10 @@
 import time
 from datetime import datetime, timezone
 
-from ytm_taste import db, lastfm_client, recommendations, youtube_client
+from ytm_taste import db, itunes_client, lastfm_client, recommendations, youtube_client
 
 RATE_LIMIT_DELAY = 0.25
+ITUNES_DELAY = 0.3
 
 
 def run_sync(
@@ -18,6 +19,7 @@ def run_sync(
     lastfm_api_key=None,
     fetch_similar_fn=lastfm_client.fetch_similar_tracks,
     sleep_fn=time.sleep,
+    fetch_song_meta_fn=itunes_client.fetch_song_meta,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -67,9 +69,16 @@ def run_sync(
                 sleep_fn(RATE_LIMIT_DELAY)
             owned = db.get_owned_song_keys(conn, user_id)
             recs = recommendations.rank(similar_by_seed, owned)
-            db.replace_recommendations(conn, user_id, recs)
+            enriched = []
+            for artist, track, score in recs:
+                meta = fetch_song_meta_fn(artist, track)
+                sleep_fn(ITUNES_DELAY)
+                image_url = meta["image_url"] if meta else None
+                preview_url = meta["preview_url"] if meta else None
+                enriched.append((artist, track, score, image_url, preview_url))
+            db.replace_recommendations(conn, user_id, enriched)
             conn.commit()
-            recommendation_count = len(recs)
+            recommendation_count = len(enriched)
         except Exception as exc:  # best-effort: never affects committed YouTube data
             conn.rollback()
             print(f"Recommendation generation failed (skipped): {exc}")

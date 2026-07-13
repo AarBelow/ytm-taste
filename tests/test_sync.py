@@ -256,13 +256,12 @@ def test_run_sync_generates_and_stores_recommendations(tmp_path):
     def liked(youtube):
         return [{"video_id": "v1", "title": "Seed Song", "channel_title": "Alpha - Topic"}]
 
-    similar_calls = []
-
     def fetch_similar(api_key, artist, track):
-        similar_calls.append((api_key, artist, track))
         return [{"artist": "New Artist", "track": "New Song", "match": 0.9}]
 
-    sleeps = []
+    def fetch_meta(artist, track):
+        return {"image_url": "http://img/new.jpg", "preview_url": "http://au/new.m4a"}
+
     summary = sync.run_sync(
         db_path,
         user_id,
@@ -274,16 +273,45 @@ def test_run_sync_generates_and_stores_recommendations(tmp_path):
         fetch_video_details_fn=lambda yt, ids: {},
         lastfm_api_key="KEY",
         fetch_similar_fn=fetch_similar,
-        sleep_fn=lambda s: sleeps.append(s),
+        fetch_song_meta_fn=fetch_meta,
+        sleep_fn=lambda s: None,
     )
     assert summary["recommendations"] == 1
-    assert similar_calls == [("KEY", "Alpha", "Seed Song")]
 
     conn = db.get_connection(db_path)
-    recs = conn.execute(
-        "SELECT artist, track FROM recommendations WHERE user_id = ?", (user_id,)
-    ).fetchall()
-    assert recs == [("New Artist", "New Song")]
+    row = conn.execute(
+        "SELECT artist, track, image_url, preview_url FROM recommendations WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    assert row == ("New Artist", "New Song", "http://img/new.jpg", "http://au/new.m4a")
+
+
+def test_run_sync_stores_recommendation_without_meta_when_itunes_misses(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    summary = sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v1", "title": "Seed", "channel_title": "Alpha - Topic"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [{"artist": "N", "track": "S", "match": 0.5}],
+        fetch_song_meta_fn=lambda a, t: None,
+        sleep_fn=lambda s: None,
+    )
+    assert summary["recommendations"] == 1
+    conn = db.get_connection(db_path)
+    row = conn.execute(
+        "SELECT image_url, preview_url FROM recommendations WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    assert row == (None, None)
 
 
 def test_run_sync_skips_recommendations_without_api_key(tmp_path):
