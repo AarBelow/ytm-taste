@@ -140,3 +140,17 @@ def replace_subscriptions(
         "INSERT INTO subscriptions (user_id, channel_id, channel_title) VALUES (?, ?, ?)",
         [(user_id, s["channel_id"], s["channel_title"]) for s in subscriptions],
     )
+
+
+def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, int]]:
+    rows = conn.execute(
+        """
+        SELECT channel_title, COUNT(*) AS liked_count
+        FROM liked_videos
+        WHERE user_id = ?
+        GROUP BY channel_title
+        ORDER BY liked_count DESC, channel_title ASC
+        """,
+        (user_id,),
+    ).fetchall()
+    return [(row[0], row[1]) for row in rows]
