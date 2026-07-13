@@ -101,3 +101,17 @@ def fetch_subscriptions(youtube) -> list[dict]:
         if not page_token:
             break
     return subscriptions
+
+
+def fetch_video_details(youtube, video_ids: list[str]) -> dict[str, dict]:
+    details: dict[str, dict] = {}
+    for start in range(0, len(video_ids), 50):
+        batch = video_ids[start : start + 50]
+        response = youtube.videos().list(part="snippet", id=",".join(batch)).execute()
+        for item in response.get("items", []):
+            snippet = item["snippet"]
+            details[item["id"]] = {
+                "channel_title": snippet.get("channelTitle"),
+                "category_id": snippet.get("categoryId"),
+            }
+    return details

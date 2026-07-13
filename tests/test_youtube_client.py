@@ -118,3 +118,66 @@ def test_fetch_subscriptions_returns_channel_id_and_title():
     youtube = FakeYoutube(subscriptions=FakeResource({None: response}))
     result = youtube_client.fetch_subscriptions(youtube)
     assert result == [{"channel_id": "UC999", "channel_title": "Some Artist"}]
+
+
+class FakeVideosResource:
+    """Fakes youtube.videos().list(id=...).execute(), returning canned items
+    per comma-joined id string and recording each id argument."""
+
+    def __init__(self, items_by_id):
+        self._items_by_id = items_by_id
+        self.id_args = []
+
+    def videos(self):
+        return self
+
+    def list(self, **kwargs):
+        self.id_args.append(kwargs["id"])
+        requested = kwargs["id"].split(",")
+        items = [self._items_by_id[i] for i in requested if i in self._items_by_id]
+        return FakeRequest({"items": items})
+
+
+def _video_item(video_id, channel_title, category_id):
+    return {
+        "id": video_id,
+        "snippet": {"channelTitle": channel_title, "categoryId": category_id},
+    }
+
+
+def test_fetch_video_details_returns_channel_and_category_map():
+    youtube = FakeVideosResource(
+        {
+            "v1": _video_item("v1", "Artist One", "10"),
+            "v2": _video_item("v2", "Some Vlogger", "22"),
+        }
+    )
+    result = youtube_client.fetch_video_details(youtube, ["v1", "v2"])
+    assert result == {
+        "v1": {"channel_title": "Artist One", "category_id": "10"},
+        "v2": {"channel_title": "Some Vlogger", "category_id": "22"},
+    }
+
+
+def test_fetch_video_details_empty_list_makes_no_api_call():
+    youtube = FakeVideosResource({})
+    result = youtube_client.fetch_video_details(youtube, [])
+    assert result == {}
+    assert youtube.id_args == []
+
+
+def test_fetch_video_details_batches_in_groups_of_50():
+    ids = [f"v{n}" for n in range(120)]
+    items = {vid: _video_item(vid, f"ch{vid}", "10") for vid in ids}
+    youtube = FakeVideosResource(items)
+    result = youtube_client.fetch_video_details(youtube, ids)
+    assert len(result) == 120
+    # 120 ids -> 3 calls (50 + 50 + 20)
+    assert len(youtube.id_args) == 3
+    assert youtube.id_args[0].count(",") == 49  # 50 ids in first batch
+
+
+def test_fetch_video_details_omits_ids_with_no_item():
+    youtube = FakeVideosResource({"v1": _video_item("v1", "Artist One", "10")})
+    result = youtube_client.fetch_video_details(youtube, ["v1", "missing"])
+    assert result == {"v1": {"channel_title": "Artist One", "category_id": "10"}}
