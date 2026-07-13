@@ -1,0 +1,72 @@
+# tests/test_lastfm_client.py
+from ytm_taste import lastfm_client
+
+
+class FakeResponse:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+def make_get(data, calls):
+    def fake_get(url, params=None, timeout=None):
+        calls.append({"url": url, "params": params})
+        return FakeResponse(data)
+
+    return fake_get
+
+
+def test_fetch_similar_tracks_parses_payload_and_sends_params():
+    data = {
+        "similartracks": {
+            "track": [
+                {"name": "Song A", "match": "1.0", "artist": {"name": "Artist A"}},
+                {"name": "Song B", "match": "0.5", "artist": {"name": "Artist B"}},
+            ]
+        }
+    }
+    calls = []
+    result = lastfm_client.fetch_similar_tracks(
+        "KEY", "Seed Artist", "Seed Track", get_fn=make_get(data, calls)
+    )
+    assert result == [
+        {"artist": "Artist A", "track": "Song A", "match": 1.0},
+        {"artist": "Artist B", "track": "Song B", "match": 0.5},
+    ]
+    params = calls[0]["params"]
+    assert params["method"] == "track.getSimilar"
+    assert params["artist"] == "Seed Artist"
+    assert params["track"] == "Seed Track"
+    assert params["api_key"] == "KEY"
+    assert params["format"] == "json"
+
+
+def test_fetch_similar_tracks_handles_single_track_dict():
+    # Last.fm returns a bare dict (not a list) when there is exactly one result
+    data = {
+        "similartracks": {
+            "track": {"name": "Only", "match": "0.9", "artist": {"name": "Solo"}}
+        }
+    }
+    result = lastfm_client.fetch_similar_tracks(
+        "KEY", "A", "B", get_fn=make_get(data, [])
+    )
+    assert result == [{"artist": "Solo", "track": "Only", "match": 0.9}]
+
+
+def test_fetch_similar_tracks_empty_or_malformed_returns_empty_list():
+    assert lastfm_client.fetch_similar_tracks("K", "A", "B", get_fn=make_get({}, [])) == []
+    assert (
+        lastfm_client.fetch_similar_tracks(
+            "K", "A", "B", get_fn=make_get({"similartracks": {}}, [])
+        )
+        == []
+    )
+    assert (
+        lastfm_client.fetch_similar_tracks(
+            "K", "A", "B", get_fn=make_get({"error": 6, "message": "nope"}, [])
+        )
+        == []
+    )
