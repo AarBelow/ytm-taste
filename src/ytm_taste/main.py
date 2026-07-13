@@ -147,6 +147,7 @@ def render_recommendations_page(recs) -> str:
 <script>
 document.querySelectorAll('.card').forEach(function(card){
   var a = card.querySelector('audio');
+  if(a){ a.volume = 0.5; }
   card.addEventListener('mouseenter', function(){ if(a){ a.play().catch(function(){}); } });
   card.addEventListener('mouseleave', function(){ if(a){ a.pause(); a.currentTime = 0; } });
 });
