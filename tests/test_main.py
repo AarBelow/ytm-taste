@@ -304,7 +304,7 @@ def test_recommendations_redirects_to_login_when_not_logged_in():
     assert response.headers["location"] == "/login"
 
 
-def test_recommendations_page_shows_recs_when_logged_in(monkeypatch, tmp_path):
+def test_recommendations_page_shows_cards_with_cover_and_audio(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     db_path = _complete_fake_login(client, monkeypatch, tmp_path)
 
@@ -313,15 +313,39 @@ def test_recommendations_page_shows_recs_when_logged_in(monkeypatch, tmp_path):
     conn = db_module.get_connection(db_path)
     user_id = conn.execute("SELECT id FROM users").fetchone()[0]
     db_module.replace_recommendations(
-        conn, user_id, [("Boards of Canada", "Roygbiv", 3.0)]
+        conn,
+        user_id,
+        [("Boards of Canada", "Roygbiv", 3.0, "http://img/roy.jpg", "http://au/roy.m4a")],
     )
     conn.commit()
     conn.close()
 
-    response = client.get("/recommendations")
-    assert response.status_code == 200
-    assert "Boards of Canada" in response.text
-    assert "Roygbiv" in response.text
+    body = client.get("/recommendations").text
+    assert "Boards of Canada" in body
+    assert "Roygbiv" in body
+    assert "http://img/roy.jpg" in body
+    assert "http://au/roy.m4a" in body
+    assert "<audio" in body
+    assert "#7c3aed" in body.lower() or "--primary" in body
+
+
+def test_recommendations_page_has_show_more_when_over_five(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    recs = [(f"A{i}", f"T{i}", float(10 - i), None, None) for i in range(7)]
+    db_module.replace_recommendations(conn, user_id, recs)
+    conn.commit()
+    conn.close()
+
+    body = client.get("/recommendations").text
+    assert "more-btn" in body
+    assert body.count("card") >= 7
+    assert "hidden" in body
 
 
 def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):

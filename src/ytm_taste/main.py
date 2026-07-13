@@ -1,7 +1,6 @@
 # src/ytm_taste/main.py
 import html
 import os
-import urllib.parse
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -45,6 +44,28 @@ a:hover{text-decoration:underline}
 .rank{font-family:'Righteous',cursive;color:var(--primary-glow);width:1.5rem}
 .count{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .empty{color:var(--muted)}
+.recs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:1.25rem;list-style:none;padding:0;margin:1.5rem 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  padding:1rem;text-align:center;cursor:pointer;transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-4px);box-shadow:0 0 24px rgba(124,58,237,.45)}
+.cover-wrap{position:relative;width:120px;height:120px;margin:0 auto .75rem}
+.cover{width:100%;height:100%;border-radius:12px;object-fit:cover;
+  transition:border-radius .3s;background:var(--surface-2)}
+.card:hover .cover{border-radius:50%;animation:spin 3s linear infinite}
+.cover-wrap::after{content:"";position:absolute;top:50%;left:50%;width:14px;height:14px;
+  margin:-7px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px rgba(255,255,255,.15);
+  opacity:0;transition:opacity .3s;pointer-events:none}
+.card:hover .cover-wrap::after{opacity:1}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.card:hover .cover{animation:none}}
+.card .artist{font-weight:600;font-size:.95rem}
+.card .track{color:var(--muted);font-size:.85rem}
+.hidden{display:none}
+.more-btn{display:block;margin:1.75rem auto 0;padding:.7rem 1.5rem;background:var(--primary);
+  color:#fff;border:none;border-radius:999px;font-family:'Poppins';font-weight:600;
+  cursor:pointer;transition:background .2s,box-shadow .2s}
+.more-btn:hover{background:var(--primary-glow);box-shadow:0 0 18px rgba(168,85,247,.5)}
 """
 
 
@@ -91,46 +112,61 @@ def render_results_page(artists) -> str:
     return _html_page("Your Top Artists", body)
 
 
-def render_recommendations_page(recs: list[tuple[str, str, float]]) -> str:
+def render_recommendations_page(recs) -> str:
     if not recs:
         body = (
+            "<h1>Songs You Might Like</h1>"
             '<p class="empty">No recommendations yet — after you log in, the sync '
             "generates them in the background; give it a moment and refresh.</p>"
+            '<p><a href="/">&larr; back to your top artists</a></p>'
         )
-    else:
-        items = "\n".join(
-            f'<li><span class="artist">{html.escape(artist)}</span>'
-            f'<span class="track">{html.escape(track)}</span>'
-            f'<a class="yt" target="_blank" '
-            f'href="https://www.youtube.com/results?search_query='
-            f'{urllib.parse.quote(artist + " " + track)}">search</a></li>'
-            for artist, track, _score in recs
+        return _html_page("Songs You Might Like", body)
+
+    cards = []
+    for i, (artist, track, _score, image_url, preview_url) in enumerate(recs):
+        hidden = " hidden" if i >= 5 else ""
+        cover = (
+            f'<img class="cover" loading="lazy" src="{html.escape(image_url)}" alt="">'
+            if image_url
+            else '<div class="cover"></div>'
         )
-        body = f'<ol class="recs">{items}</ol>'
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Songs You Might Like</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; max-width: 640px;
-         margin: 2rem auto; padding: 0 1rem; }}
-  h1 {{ font-size: 1.5rem; }}
-  ol.recs {{ list-style: none; padding: 0; }}
-  ol.recs li {{ display: flex; align-items: baseline; gap: 0.75rem;
-                padding: 0.35rem 0; border-bottom: 1px solid #8883; }}
-  .artist {{ font-weight: 600; }}
-  .track {{ flex: 1; opacity: 0.85; }}
-  .empty {{ opacity: 0.7; }}
-</style>
-</head>
-<body>
-<h1>Songs You Might Like</h1>
-<p><a href="/">&larr; back to your top artists</a></p>
-{body}
-</body>
-</html>"""
+        audio = (
+            f'<audio preload="none" src="{html.escape(preview_url)}"></audio>'
+            if preview_url
+            else ""
+        )
+        cards.append(
+            f'<li class="card{hidden}">'
+            f'<div class="cover-wrap">{cover}</div>'
+            f'<div class="artist">{html.escape(artist)}</div>'
+            f'<div class="track">{html.escape(track)}</div>'
+            f"{audio}</li>"
+        )
+    more = '<button id="more-btn" class="more-btn">Show 5 more</button>' if len(recs) > 5 else ""
+    script = """
+<script>
+document.querySelectorAll('.card').forEach(function(card){
+  var a = card.querySelector('audio');
+  card.addEventListener('mouseenter', function(){ if(a){ a.play().catch(function(){}); } });
+  card.addEventListener('mouseleave', function(){ if(a){ a.pause(); a.currentTime = 0; } });
+});
+var moreBtn = document.getElementById('more-btn');
+if(moreBtn){ moreBtn.addEventListener('click', function(){
+  var hidden = document.querySelectorAll('.card.hidden');
+  for(var i=0;i<5 && i<hidden.length;i++){ hidden[i].classList.remove('hidden'); }
+  if(document.querySelectorAll('.card.hidden').length===0){ moreBtn.style.display='none'; }
+}); }
+</script>
+"""
+    body = (
+        "<h1>Songs You Might Like</h1>"
+        '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
+        f'<ul class="recs">{"".join(cards)}</ul>'
+        f"{more}"
+        '<p><a href="/">&larr; back to your top artists</a></p>'
+        f"{script}"
+    )
+    return _html_page("Songs You Might Like", body)
 
 
 @app.get("/")
