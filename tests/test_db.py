@@ -258,3 +258,62 @@ def test_get_top_artists_playlist_songs_stay_per_user():
     _add_music_playlist(conn, user1, "Mix1", [("v1", "s1", "Alpha", "10")])
     _add_music_playlist(conn, user2, "Mix2", [("v2", "s2", "Alpha", "10")])
     assert db.get_top_artists(conn, user1) == [("Alpha", 1)]
+
+
+def test_get_clean_seed_songs_returns_topic_liked_and_playlist_pairs():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        user_id,
+        [
+            {"video_id": "v1", "title": "Liked Song", "channel_title": "Alpha - Topic"},
+            {"video_id": "v2", "title": "Cover", "channel_title": "Some Uploader"},
+        ],
+    )
+    _add_music_playlist(
+        conn,
+        user_id,
+        "Mix",
+        [
+            ("v3", "PL Song", "Beta - Topic", "10"),
+            ("v4", "Non music", "Gamma - Topic", "22"),
+        ],
+    )
+    seeds = sorted(db.get_clean_seed_songs(conn, user_id))
+    assert seeds == [("Alpha", "Liked Song"), ("Beta", "PL Song")]
+
+
+def test_get_owned_song_keys_lowercases_all_liked_and_music_songs():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "HELLO", "channel_title": "Alpha - Topic"}]
+    )
+    _add_music_playlist(conn, user_id, "Mix", [("v2", "World", "Beta", "10")])
+    keys = db.get_owned_song_keys(conn, user_id)
+    assert ("alpha", "hello") in keys
+    assert ("beta", "world") in keys
+
+
+def test_replace_and_get_recommendations_round_trip_and_replace():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_recommendations(
+        conn, user_id, [("Artist A", "Song A", 2.0), ("Artist B", "Song B", 1.0)]
+    )
+    assert db.get_recommendations(conn, user_id) == [
+        ("Artist A", "Song A", 2.0),
+        ("Artist B", "Song B", 1.0),
+    ]
+    db.replace_recommendations(conn, user_id, [("Artist C", "Song C", 5.0)])
+    assert db.get_recommendations(conn, user_id) == [("Artist C", "Song C", 5.0)]
+
+
+def test_recommendations_stay_per_user():
+    conn = make_conn()
+    user1 = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    user2 = db.get_or_create_user(conn, "UC_user2", "{}", "2026-07-13T00:00:00")
+    db.replace_recommendations(conn, user1, [("A", "a", 1.0)])
+    db.replace_recommendations(conn, user2, [("B", "b", 2.0)])
+    assert db.get_recommendations(conn, user1) == [("A", "a", 1.0)]

@@ -55,6 +55,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             channel_id TEXT NOT NULL,
             channel_title TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            artist TEXT NOT NULL,
+            track TEXT NOT NULL,
+            score REAL NOT NULL
+        );
         """
     )
     conn.commit()
@@ -181,3 +189,59 @@ def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, i
             continue
         counts[normalize_artist(channel_title)] += 1
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str]]:
+    rows = conn.execute(
+        """
+        SELECT channel_title, title FROM liked_videos
+        WHERE user_id = ? AND channel_title LIKE '% - Topic'
+        UNION ALL
+        SELECT pi.channel_title, pi.title
+        FROM playlist_items pi
+        JOIN playlists p ON p.id = pi.playlist_row_id
+        WHERE p.user_id = ? AND pi.category_id = '10'
+              AND pi.channel_title LIKE '% - Topic'
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    return [(normalize_artist(channel), title) for channel, title in rows]
+
+
+def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str, str]]:
+    rows = conn.execute(
+        """
+        SELECT channel_title, title FROM liked_videos WHERE user_id = ?
+        UNION ALL
+        SELECT pi.channel_title, pi.title
+        FROM playlist_items pi
+        JOIN playlists p ON p.id = pi.playlist_row_id
+        WHERE p.user_id = ? AND pi.category_id = '10'
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    keys = set()
+    for channel, title in rows:
+        if channel is None:
+            continue
+        keys.add((normalize_artist(channel).lower().strip(), title.lower().strip()))
+    return keys
+
+
+def replace_recommendations(
+    conn: sqlite3.Connection, user_id: int, recs: list[tuple[str, str, float]]
+) -> None:
+    conn.execute("DELETE FROM recommendations WHERE user_id = ?", (user_id,))
+    conn.executemany(
+        "INSERT INTO recommendations (user_id, artist, track, score) VALUES (?, ?, ?, ?)",
+        [(user_id, artist, track, score) for artist, track, score in recs],
+    )
+
+
+def get_recommendations(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str, float]]:
+    rows = conn.execute(
+        "SELECT artist, track, score FROM recommendations WHERE user_id = ? "
+        "ORDER BY score DESC, artist ASC",
+        (user_id,),
+    ).fetchall()
+    return [(artist, track, score) for artist, track, score in rows]
