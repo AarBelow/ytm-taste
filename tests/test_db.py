@@ -300,20 +300,25 @@ def test_replace_and_get_recommendations_round_trip_and_replace():
     conn = make_conn()
     user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     db.replace_recommendations(
-        conn, user_id, [("Artist A", "Song A", 2.0), ("Artist B", "Song B", 1.0)]
+        conn,
+        user_id,
+        [
+            ("Artist A", "Song A", 2.0, "http://img/a.jpg", "http://au/a.m4a"),
+            ("Artist B", "Song B", 1.0, None, None),
+        ],
     )
     assert db.get_recommendations(conn, user_id) == [
-        ("Artist A", "Song A", 2.0),
-        ("Artist B", "Song B", 1.0),
+        ("Artist A", "Song A", 2.0, "http://img/a.jpg", "http://au/a.m4a"),
+        ("Artist B", "Song B", 1.0, None, None),
     ]
-    db.replace_recommendations(conn, user_id, [("Artist C", "Song C", 5.0)])
-    assert db.get_recommendations(conn, user_id) == [("Artist C", "Song C", 5.0)]
+    db.replace_recommendations(conn, user_id, [("Artist C", "Song C", 5.0, None, None)])
+    assert db.get_recommendations(conn, user_id) == [("Artist C", "Song C", 5.0, None, None)]
 
 
 def test_recommendations_stay_per_user():
     conn = make_conn()
     user1 = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     user2 = db.get_or_create_user(conn, "UC_user2", "{}", "2026-07-13T00:00:00")
-    db.replace_recommendations(conn, user1, [("A", "a", 1.0)])
-    db.replace_recommendations(conn, user2, [("B", "b", 2.0)])
-    assert db.get_recommendations(conn, user1) == [("A", "a", 1.0)]
+    db.replace_recommendations(conn, user1, [("A", "a", 1.0, None, None)])
+    db.replace_recommendations(conn, user2, [("B", "b", 2.0, None, None)])
+    assert db.get_recommendations(conn, user1) == [("A", "a", 1.0, None, None)]

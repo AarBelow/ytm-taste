@@ -61,7 +61,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             user_id INTEGER NOT NULL REFERENCES users(id),
             artist TEXT NOT NULL,
             track TEXT NOT NULL,
-            score REAL NOT NULL
+            score REAL NOT NULL,
+            image_url TEXT,
+            preview_url TEXT
         );
         """
     )
@@ -228,20 +230,22 @@ def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str
     return keys
 
 
-def replace_recommendations(
-    conn: sqlite3.Connection, user_id: int, recs: list[tuple[str, str, float]]
-) -> None:
+def replace_recommendations(conn: sqlite3.Connection, user_id: int, recs) -> None:
     conn.execute("DELETE FROM recommendations WHERE user_id = ?", (user_id,))
     conn.executemany(
-        "INSERT INTO recommendations (user_id, artist, track, score) VALUES (?, ?, ?, ?)",
-        [(user_id, artist, track, score) for artist, track, score in recs],
+        "INSERT INTO recommendations (user_id, artist, track, score, image_url, preview_url) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (user_id, artist, track, score, image_url, preview_url)
+            for (artist, track, score, image_url, preview_url) in recs
+        ],
     )
 
 
-def get_recommendations(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str, float]]:
+def get_recommendations(conn: sqlite3.Connection, user_id: int):
     rows = conn.execute(
-        "SELECT artist, track, score FROM recommendations WHERE user_id = ? "
-        "ORDER BY score DESC, artist ASC",
+        "SELECT artist, track, score, image_url, preview_url FROM recommendations "
+        "WHERE user_id = ? ORDER BY score DESC, artist ASC",
         (user_id,),
     ).fetchall()
-    return [(artist, track, score) for artist, track, score in rows]
+    return [(a, t, s, img, prev) for (a, t, s, img, prev) in rows]

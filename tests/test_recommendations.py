@@ -51,3 +51,7 @@ def test_rank_caps_at_limit():
     assert len(result) == 3
     # highest match first
     assert result[0] == ("A9", "T9", 9.0)
+
+
+def test_max_recommendations_is_25():
+    assert recommendations.MAX_RECOMMENDATIONS == 25

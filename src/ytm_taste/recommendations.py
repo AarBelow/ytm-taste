@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 MAX_SEED_SONGS = 50
-MAX_RECOMMENDATIONS = 50
+MAX_RECOMMENDATIONS = 25
 
 
 def select_seeds(clean_songs, top_artists, limit=MAX_SEED_SONGS):
