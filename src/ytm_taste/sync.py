@@ -20,6 +20,8 @@ def run_sync(
     fetch_similar_fn=lastfm_client.fetch_similar_tracks,
     sleep_fn=time.sleep,
     fetch_song_meta_fn=itunes_client.fetch_song_meta,
+    fetch_channel_avatars_fn=youtube_client.fetch_channel_avatars,
+    fetch_artist_info_fn=lastfm_client.fetch_artist_info,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -43,6 +45,7 @@ def run_sync(
                 d = details.get(item["video_id"], {})
                 item["channel_title"] = d.get("channel_title")
                 item["category_id"] = d.get("category_id")
+                item["channel_id"] = d.get("channel_id")
 
         subscriptions = fetch_subscriptions_fn(youtube)
 
@@ -82,6 +85,27 @@ def run_sync(
         except Exception as exc:  # best-effort: never affects committed YouTube data
             conn.rollback()
             print(f"Recommendation generation failed (skipped): {exc}")
+
+    try:
+        top_artists = db.get_top_artists(conn, user_id)[:5]
+        channels = db.get_top_artist_channels(conn, user_id)
+        wanted = [channels[name] for name, _c in top_artists if name in channels]
+        avatars = fetch_channel_avatars_fn(youtube, wanted) if wanted else {}
+        for name, _count in top_artists:
+            channel_id = channels.get(name)
+            avatar = avatars.get(channel_id) if channel_id else None
+            info = None
+            if lastfm_api_key:
+                info = fetch_artist_info_fn(lastfm_api_key, name)
+                sleep_fn(RATE_LIMIT_DELAY)
+            info = info or {}
+            db.upsert_artist_details(
+                conn, name, avatar, info.get("genre"), info.get("bio"), info.get("listeners")
+            )
+        conn.commit()
+    except Exception as exc:  # best-effort; never fails the sync
+        conn.rollback()
+        print(f"Artist-details enrichment failed (skipped): {exc}")
 
     elapsed = time.monotonic() - start
     summary = {
