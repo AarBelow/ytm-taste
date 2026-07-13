@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 from ytm_taste import google_oauth, main, youtube_client
 
 
-def test_read_root():
+def test_health_returns_status():
     client = TestClient(main.app)
-    response = client.get("/")
+    response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "ytm-taste"}
 
@@ -162,3 +162,98 @@ def test_auth_callback_without_channel_does_not_create_user(monkeypatch, tmp_pat
 
     response = client.get("/auth/callback", params={"state": "expected-state", "code": "abc"})
     assert response.status_code == 400
+
+
+def _complete_fake_login(client, monkeypatch, tmp_path, channel_id="UC123"):
+    """Drive the real /login + /auth/callback flow with fakes so the client
+    ends up with a valid signed session cookie carrying user_id, and returns
+    the db path the app is using."""
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    monkeypatch.setattr(google_oauth, "build_flow", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        google_oauth,
+        "get_authorization_url",
+        lambda flow: ("https://accounts.google.com/fake", "st", "vf"),
+    )
+    monkeypatch.setattr(google_oauth, "fetch_credentials", lambda flow, url: FakeCredentials())
+    monkeypatch.setattr(youtube_client, "build_youtube_client", lambda credentials: object())
+    monkeypatch.setattr(youtube_client, "get_channel_id", lambda youtube: channel_id)
+    monkeypatch.setattr(
+        main.sync,
+        "run_sync",
+        lambda *a, **kw: {
+            "liked_videos": 0,
+            "playlists": 0,
+            "subscriptions": 0,
+            "elapsed_seconds": 0.0,
+        },
+    )
+    client.get("/login")
+    client.get("/auth/callback", params={"state": "st", "code": "abc"})
+    return db_path
+
+
+def test_root_redirects_to_login_when_not_logged_in():
+    client = TestClient(main.app, follow_redirects=False)
+    response = client.get("/")
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/login"
+
+
+def test_display_artist_strips_topic_suffix():
+    assert main._display_artist("Jinwoo Jung - Topic") == "Jinwoo Jung"
+    assert main._display_artist("Some Band") == "Some Band"
+    # only a trailing suffix is stripped, not a mid-string occurrence
+    assert main._display_artist("A - Topic B") == "A - Topic B"
+
+
+def test_render_results_page_lists_artists_in_order():
+    html_out = main.render_results_page([("Alpha", 5), ("Beta", 2)])
+    assert "Alpha" in html_out
+    assert "Beta" in html_out
+    # highest count appears before lower count in the document
+    assert html_out.index("Alpha") < html_out.index("Beta")
+    assert "5" in html_out and "2" in html_out
+
+
+def test_render_results_page_empty_state():
+    html_out = main.render_results_page([])
+    assert "synced yet" in html_out.lower()
+
+
+def test_root_shows_top_artists_when_logged_in(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_liked_videos(
+        conn,
+        user_id,
+        [
+            {"video_id": "v1", "title": "s1", "channel_title": "Radiohead - Topic"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Radiohead - Topic"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Alt-J"},
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+    assert "Radiohead" in body
+    assert "Radiohead - Topic" not in body  # suffix stripped in display
+    assert "Alt-J" in body
+    assert body.index("Radiohead") < body.index("Alt-J")  # 2 before 1
+
+
+def test_root_shows_empty_state_when_logged_in_with_no_liked_videos(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "synced yet" in response.text.lower()

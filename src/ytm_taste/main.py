@@ -1,4 +1,5 @@
 # src/ytm_taste/main.py
+import html
 import os
 from datetime import datetime, timezone
 
@@ -25,9 +26,68 @@ REDIRECT_URI = "http://127.0.0.1:8000/auth/callback"
 DB_PATH = "data/ytm_taste.db"
 
 
-@app.get("/")
-def read_root():
+@app.get("/health")
+def health():
     return {"status": "ok", "service": "ytm-taste"}
+
+
+def _display_artist(channel_title: str) -> str:
+    suffix = " - Topic"
+    if channel_title.endswith(suffix):
+        return channel_title[: -len(suffix)]
+    return channel_title
+
+
+def render_results_page(artists: list[tuple[str, int]]) -> str:
+    if not artists:
+        body = (
+            '<p class="empty">No liked music synced yet — if you just logged in, '
+            "give it a few seconds and refresh.</p>"
+        )
+    else:
+        items = "\n".join(
+            f'<li><span class="rank">{i}</span>'
+            f'<span class="artist">{html.escape(_display_artist(name))}</span>'
+            f'<span class="count">{count}</span></li>'
+            for i, (name, count) in enumerate(artists, start=1)
+        )
+        body = f'<ol class="artists">{items}</ol>'
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Top Artists</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; max-width: 640px;
+         margin: 2rem auto; padding: 0 1rem; }}
+  h1 {{ font-size: 1.5rem; }}
+  ol.artists {{ list-style: none; padding: 0; }}
+  ol.artists li {{ display: flex; align-items: baseline; gap: 0.75rem;
+                   padding: 0.35rem 0; border-bottom: 1px solid #8883; }}
+  .rank {{ width: 2rem; text-align: right; opacity: 0.6; }}
+  .artist {{ flex: 1; }}
+  .count {{ opacity: 0.7; font-variant-numeric: tabular-nums; }}
+  .empty {{ opacity: 0.7; }}
+</style>
+</head>
+<body>
+<h1>Your Top Artists</h1>
+{body}
+</body>
+</html>"""
+
+
+@app.get("/")
+def read_root(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return RedirectResponse("/login")
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    artists = db.get_top_artists(conn, user_id)
+    conn.close()
+    return HTMLResponse(render_results_page(artists))
 
 
 def _build_flow(code_verifier: str | None = None):
