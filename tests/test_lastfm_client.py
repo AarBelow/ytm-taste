@@ -70,3 +70,29 @@ def test_fetch_similar_tracks_empty_or_malformed_returns_empty_list():
         )
         == []
     )
+
+
+def test_fetch_artist_info_parses_genre_bio_listeners():
+    data = {
+        "artist": {
+            "stats": {"listeners": "741785"},
+            "bio": {"summary": 'Potsu is a Lo-Fi producer. <a href="x">Read more on Last.fm</a>'},
+            "tags": {"tag": [{"name": "Lo-Fi"}, {"name": "chill"}]},
+        }
+    }
+    result = lastfm_client.fetch_artist_info("KEY", "potsu", get_fn=make_get(data, []))
+    assert result["genre"] == "Lo-Fi"
+    assert result["listeners"] == 741785
+    assert "Read more on Last.fm" not in result["bio"]
+    assert "<a" not in result["bio"]
+    assert result["bio"].startswith("Potsu is a Lo-Fi producer.")
+
+
+def test_fetch_artist_info_none_when_missing():
+    assert lastfm_client.fetch_artist_info("K", "x", get_fn=make_get({}, [])) is None
+    assert (
+        lastfm_client.fetch_artist_info(
+            "K", "x", get_fn=make_get({"error": 6, "message": "not found"}, [])
+        )
+        is None
+    )
