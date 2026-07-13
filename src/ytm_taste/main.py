@@ -31,13 +31,6 @@ def health():
     return {"status": "ok", "service": "ytm-taste"}
 
 
-def _display_artist(channel_title: str) -> str:
-    suffix = " - Topic"
-    if channel_title.endswith(suffix):
-        return channel_title[: -len(suffix)]
-    return channel_title
-
-
 def render_results_page(artists: list[tuple[str, int]]) -> str:
     if not artists:
         body = (
@@ -47,7 +40,7 @@ def render_results_page(artists: list[tuple[str, int]]) -> str:
     else:
         items = "\n".join(
             f'<li><span class="rank">{i}</span>'
-            f'<span class="artist">{html.escape(_display_artist(name))}</span>'
+            f'<span class="artist">{html.escape(name)}</span>'
             f'<span class="count">{count}</span></li>'
             for i, (name, count) in enumerate(artists, start=1)
         )

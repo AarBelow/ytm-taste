@@ -201,13 +201,6 @@ def test_root_redirects_to_login_when_not_logged_in():
     assert response.headers["location"] == "/login"
 
 
-def test_display_artist_strips_topic_suffix():
-    assert main._display_artist("Jinwoo Jung - Topic") == "Jinwoo Jung"
-    assert main._display_artist("Some Band") == "Some Band"
-    # only a trailing suffix is stripped, not a mid-string occurrence
-    assert main._display_artist("A - Topic B") == "A - Topic B"
-
-
 def test_render_results_page_lists_artists_in_order():
     html_out = main.render_results_page([("Alpha", 5), ("Beta", 2)])
     assert "Alpha" in html_out
@@ -249,6 +242,44 @@ def test_root_shows_top_artists_when_logged_in(monkeypatch, tmp_path):
     assert "Radiohead - Topic" not in body  # suffix stripped in display
     assert "Alt-J" in body
     assert body.index("Radiohead") < body.index("Alt-J")  # 2 before 1
+
+
+def test_root_page_reflects_combined_liked_and_playlist_tally(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    # "Both": 1 liked + 1 playlist = 2; "PlaylistOnly": 1 playlist = 1
+    db_module.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Both"}]
+    )
+    db_module.replace_playlists(
+        conn,
+        user_id,
+        [
+            {
+                "playlist_id": "PL1",
+                "title": "Mix",
+                "items": [
+                    {"video_id": "v2", "title": "s2", "channel_title": "Both",
+                     "category_id": "10"},
+                    {"video_id": "v3", "title": "s3", "channel_title": "PlaylistOnly",
+                     "category_id": "10"},
+                ],
+            }
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+    assert "Both" in body and "PlaylistOnly" in body
+    assert body.index("Both") < body.index("PlaylistOnly")  # 2 ranks above 1
 
 
 def test_root_shows_empty_state_when_logged_in_with_no_liked_videos(monkeypatch, tmp_path):
