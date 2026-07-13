@@ -30,7 +30,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             user_id INTEGER NOT NULL REFERENCES users(id),
             video_id TEXT NOT NULL,
             title TEXT NOT NULL,
-            channel_title TEXT NOT NULL
+            channel_title TEXT NOT NULL,
+            channel_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS playlists (
@@ -46,7 +47,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             video_id TEXT NOT NULL,
             title TEXT NOT NULL,
             channel_title TEXT,
-            category_id TEXT
+            category_id TEXT,
+            channel_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS subscriptions (
@@ -64,6 +66,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             score REAL NOT NULL,
             image_url TEXT,
             preview_url TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS artist_details (
+            artist_name TEXT PRIMARY KEY,
+            avatar_url TEXT,
+            genre TEXT,
+            bio TEXT,
+            listeners INTEGER
         );
         """
     )
@@ -113,8 +123,12 @@ def finish_sync_run(
 def replace_liked_videos(conn: sqlite3.Connection, user_id: int, videos: list[dict]) -> None:
     conn.execute("DELETE FROM liked_videos WHERE user_id = ?", (user_id,))
     conn.executemany(
-        "INSERT INTO liked_videos (user_id, video_id, title, channel_title) VALUES (?, ?, ?, ?)",
-        [(user_id, v["video_id"], v["title"], v["channel_title"]) for v in videos],
+        "INSERT INTO liked_videos (user_id, video_id, title, channel_title, channel_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            (user_id, v["video_id"], v["title"], v["channel_title"], v.get("channel_id"))
+            for v in videos
+        ],
     )
 
 
@@ -141,8 +155,8 @@ def replace_playlists(conn: sqlite3.Connection, user_id: int, playlists: list[di
         items = playlist.get("items", [])
         conn.executemany(
             "INSERT INTO playlist_items "
-            "(playlist_row_id, video_id, title, channel_title, category_id) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "(playlist_row_id, video_id, title, channel_title, category_id, channel_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             [
                 (
                     playlist_row_id,
@@ -150,6 +164,7 @@ def replace_playlists(conn: sqlite3.Connection, user_id: int, playlists: list[di
                     item["title"],
                     item.get("channel_title"),
                     item.get("category_id"),
+                    item.get("channel_id"),
                 )
                 for item in items
             ],
@@ -249,3 +264,42 @@ def get_recommendations(conn: sqlite3.Connection, user_id: int):
         (user_id,),
     ).fetchall()
     return [(a, t, s, img, prev) for (a, t, s, img, prev) in rows]
+
+
+def get_top_artist_channels(conn: sqlite3.Connection, user_id: int) -> dict:
+    rows = conn.execute(
+        """
+        SELECT channel_title, channel_id FROM liked_videos WHERE user_id = ?
+        UNION ALL
+        SELECT pi.channel_title, pi.channel_id
+        FROM playlist_items pi JOIN playlists p ON p.id = pi.playlist_row_id
+        WHERE p.user_id = ? AND pi.category_id = '10'
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    mapping: dict = {}
+    for channel_title, channel_id in rows:
+        if channel_title is None or channel_id is None:
+            continue
+        mapping.setdefault(normalize_artist(channel_title), channel_id)
+    return mapping
+
+
+def upsert_artist_details(conn, artist_name, avatar_url, genre, bio, listeners) -> None:
+    conn.execute(
+        "INSERT INTO artist_details (artist_name, avatar_url, genre, bio, listeners) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(artist_name) DO UPDATE SET "
+        "avatar_url=excluded.avatar_url, genre=excluded.genre, bio=excluded.bio, "
+        "listeners=excluded.listeners",
+        (artist_name, avatar_url, genre, bio, listeners),
+    )
+
+
+def get_artist_details(conn, artist_name) -> dict | None:
+    row = conn.execute(
+        "SELECT avatar_url, genre, bio, listeners FROM artist_details WHERE artist_name = ?",
+        (artist_name,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"avatar_url": row[0], "genre": row[1], "bio": row[2], "listeners": row[3]}

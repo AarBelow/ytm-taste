@@ -322,3 +322,28 @@ def test_recommendations_stay_per_user():
     db.replace_recommendations(conn, user1, [("A", "a", 1.0, None, None)])
     db.replace_recommendations(conn, user2, [("B", "b", 2.0, None, None)])
     assert db.get_recommendations(conn, user1) == [("A", "a", 1.0, None, None)]
+
+
+def test_get_top_artist_channels_maps_normalized_name_to_channel_id():
+    conn = make_conn()
+    user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        user_id,
+        [{"video_id": "v1", "title": "s", "channel_title": "AZALI - Topic", "channel_id": "UCaz"}],
+    )
+    assert db.get_top_artist_channels(conn, user_id) == {"AZALI": "UCaz"}
+
+
+def test_upsert_and_get_artist_details_round_trip():
+    conn = make_conn()
+    db.upsert_artist_details(conn, "potsu", "http://a/p.jpg", "Lo-Fi", "A producer.", 741785)
+    assert db.get_artist_details(conn, "potsu") == {
+        "avatar_url": "http://a/p.jpg",
+        "genre": "Lo-Fi",
+        "bio": "A producer.",
+        "listeners": 741785,
+    }
+    db.upsert_artist_details(conn, "potsu", None, "chill", "Updated.", 1)
+    assert db.get_artist_details(conn, "potsu")["bio"] == "Updated."
+    assert db.get_artist_details(conn, "missing") is None
