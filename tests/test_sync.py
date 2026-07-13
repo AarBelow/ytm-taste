@@ -19,6 +19,11 @@ def fake_subscriptions(youtube):
     return [{"channel_id": "UC1", "channel_title": "Some Artist"}]
 
 
+def fake_video_details(youtube, video_ids):
+    # default: every playlist video resolves to a music track by "PL Artist"
+    return {vid: {"channel_title": "PL Artist", "category_id": "10"} for vid in video_ids}
+
+
 def make_user(db_path, channel_id):
     conn = db.get_connection(db_path)
     db.init_db(conn)
@@ -38,6 +43,7 @@ def test_run_sync_saves_all_four_data_types(tmp_path):
         fetch_playlists_fn=fake_playlists,
         fetch_playlist_items_fn=fake_playlist_items,
         fetch_subscriptions_fn=fake_subscriptions,
+        fetch_video_details_fn=fake_video_details,
     )
     assert summary["liked_videos"] == 1
     assert summary["playlists"] == 1
@@ -86,6 +92,7 @@ def test_run_sync_replaces_not_accumulates_on_second_run(tmp_path):
         fetch_playlists_fn=no_playlists,
         fetch_playlist_items_fn=fake_playlist_items,
         fetch_subscriptions_fn=no_subs,
+        fetch_video_details_fn=fake_video_details,
     )
     sync.run_sync(
         db_path,
@@ -95,6 +102,7 @@ def test_run_sync_replaces_not_accumulates_on_second_run(tmp_path):
         fetch_playlists_fn=no_playlists,
         fetch_playlist_items_fn=fake_playlist_items,
         fetch_subscriptions_fn=no_subs,
+        fetch_video_details_fn=fake_video_details,
     )
 
     conn = db.get_connection(db_path)
@@ -155,6 +163,7 @@ def test_run_sync_keeps_different_users_data_separated(tmp_path):
         fetch_playlists_fn=no_playlists,
         fetch_playlist_items_fn=fake_playlist_items,
         fetch_subscriptions_fn=no_subs,
+        fetch_video_details_fn=fake_video_details,
     )
     sync.run_sync(
         db_path,
@@ -164,6 +173,7 @@ def test_run_sync_keeps_different_users_data_separated(tmp_path):
         fetch_playlists_fn=no_playlists,
         fetch_playlist_items_fn=fake_playlist_items,
         fetch_subscriptions_fn=no_subs,
+        fetch_video_details_fn=fake_video_details,
     )
 
     conn = db.get_connection(db_path)
@@ -175,3 +185,65 @@ def test_run_sync_keeps_different_users_data_separated(tmp_path):
     ).fetchone()[0]
     assert user1_videos == 1
     assert user2_videos == 0
+
+
+def test_run_sync_enriches_playlist_items_with_channel_and_category(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def one_playlist(youtube):
+        return [{"playlist_id": "PL1", "title": "Mix"}]
+
+    def items(youtube, playlist_id):
+        return [{"video_id": "v2", "title": "Song Two"}]
+
+    def details(youtube, video_ids):
+        return {"v2": {"channel_title": "Real Artist", "category_id": "10"}}
+
+    sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [],
+        fetch_playlists_fn=one_playlist,
+        fetch_playlist_items_fn=items,
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=details,
+    )
+
+    conn = db.get_connection(db_path)
+    row = conn.execute(
+        "SELECT video_id, channel_title, category_id FROM playlist_items"
+    ).fetchone()
+    assert row == ("v2", "Real Artist", "10")
+
+
+def test_run_sync_stores_none_when_video_details_missing(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def one_playlist(youtube):
+        return [{"playlist_id": "PL1", "title": "Mix"}]
+
+    def items(youtube, playlist_id):
+        return [{"video_id": "v_deleted", "title": "Gone"}]
+
+    def details(youtube, video_ids):
+        return {}
+
+    sync.run_sync(
+        db_path,
+        user_id,
+        youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [],
+        fetch_playlists_fn=one_playlist,
+        fetch_playlist_items_fn=items,
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=details,
+    )
+
+    conn = db.get_connection(db_path)
+    row = conn.execute(
+        "SELECT video_id, channel_title, category_id FROM playlist_items"
+    ).fetchone()
+    assert row == ("v_deleted", None, None)

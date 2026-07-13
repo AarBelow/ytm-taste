@@ -12,6 +12,7 @@ def run_sync(
     fetch_playlists_fn=youtube_client.fetch_playlists,
     fetch_playlist_items_fn=youtube_client.fetch_playlist_items,
     fetch_subscriptions_fn=youtube_client.fetch_subscriptions,
+    fetch_video_details_fn=youtube_client.fetch_video_details,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -25,6 +26,17 @@ def run_sync(
         playlists = fetch_playlists_fn(youtube)
         for playlist in playlists:
             playlist["items"] = fetch_playlist_items_fn(youtube, playlist["playlist_id"])
+
+        all_video_ids = [
+            item["video_id"] for playlist in playlists for item in playlist["items"]
+        ]
+        details = fetch_video_details_fn(youtube, all_video_ids)
+        for playlist in playlists:
+            for item in playlist["items"]:
+                d = details.get(item["video_id"], {})
+                item["channel_title"] = d.get("channel_title")
+                item["category_id"] = d.get("category_id")
+
         subscriptions = fetch_subscriptions_fn(youtube)
 
         db.replace_liked_videos(conn, user_id, liked_videos)
