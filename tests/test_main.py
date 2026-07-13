@@ -322,3 +322,30 @@ def test_recommendations_page_shows_recs_when_logged_in(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert "Boards of Canada" in response.text
     assert "Roygbiv" in response.text
+
+
+def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    liked = []
+    for n, count in [(6, 6), (5, 5), (4, 4), (3, 3), (2, 2), (1, 1)]:
+        for i in range(count):
+            liked.append({"video_id": f"v{n}_{i}", "title": "s", "channel_title": f"Artist{n}"})
+    db_module.replace_liked_videos(conn, user_id, liked)
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert "Artist6" in body and "Artist2" in body
+    assert "Artist1" not in body
+
+
+def test_home_uses_dark_theme(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    body = client.get("/").text
+    assert "#7c3aed" in body.lower() or "--primary" in body
