@@ -66,6 +66,20 @@ a:hover{text-decoration:underline}
   color:#fff;border:none;border-radius:999px;font-family:'Poppins';font-weight:600;
   cursor:pointer;transition:background .2s,box-shadow .2s}
 .more-btn:hover{background:var(--primary-glow);box-shadow:0 0 18px rgba(168,85,247,.5)}
+.profiles{list-style:none;padding:0;margin:1.5rem 0;display:flex;flex-direction:column;gap:1rem}
+.profile{display:flex;align-items:center;gap:1.25rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:20px;padding:1.25rem 1.5rem}
+.profile:nth-child(even){flex-direction:row-reverse;text-align:right}
+.avatar{width:84px;height:84px;border-radius:50%;object-fit:cover;flex:0 0 auto;
+  background:var(--surface-2);border:2px solid var(--primary-glow)}
+.avatar-ph{display:flex;align-items:center;justify-content:center;
+  font-family:'Righteous',cursive;font-size:2rem;color:var(--primary-glow)}
+.p-body{flex:1;min-width:0}
+.p-name{font-family:'Righteous',cursive;font-size:1.25rem;color:var(--fg);margin:0 0 .15rem}
+.p-genre{color:var(--primary-glow);font-size:.85rem;text-transform:uppercase;
+  letter-spacing:.04em;margin:0 0 .4rem}
+.p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
+.p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
 """
 
 
@@ -96,19 +110,32 @@ def render_results_page(artists) -> str:
             "give it a few seconds and refresh.</p>"
             '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
         )
-    else:
-        items = "\n".join(
-            f'<li><span class="rank">{i}</span>'
-            f'<span class="artist">{html.escape(name)}</span>'
-            f'<span class="count">{count}</span></li>'
-            for i, (name, count) in enumerate(artists, start=1)
+        return _html_page("Your Top Artists", body)
+
+    cards = []
+    for a in artists:
+        name = html.escape(a["name"])
+        if a["avatar"]:
+            avatar = f'<img class="avatar" src="{html.escape(a["avatar"])}" alt="">'
+        else:
+            initial = html.escape(a["name"][:1].upper() or "?")
+            avatar = f'<div class="avatar avatar-ph">{initial}</div>'
+        genre = f'<p class="p-genre">{html.escape(a["genre"])}</p>' if a["genre"] else ""
+        bio = f'<p class="p-bio">{html.escape(a["bio"])}</p>' if a["bio"] else ""
+        if a["listeners"]:
+            fact = f'<p class="p-fact">{a["listeners"]:,} listeners on Last.fm</p>'
+        else:
+            fact = ""
+        cards.append(
+            f'<li class="profile">{avatar}'
+            f'<div class="p-body"><p class="p-name">{name}</p>{genre}{bio}{fact}</div></li>'
         )
-        body = (
-            "<h1>Your Top Artists</h1>"
-            '<p class="sub">Your most-played artists across likes and playlists.</p>'
-            f'<ol class="artists">{items}</ol>'
-            '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
-        )
+    body = (
+        "<h1>Your Top Artists</h1>"
+        '<p class="sub">Your most-played artists across likes and playlists.</p>'
+        f'<ul class="profiles">{"".join(cards)}</ul>'
+        '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
+    )
     return _html_page("Your Top Artists", body)
 
 
@@ -177,7 +204,19 @@ def read_root(request: Request):
         return RedirectResponse("/login")
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
-    artists = db.get_top_artists(conn, user_id)[:5]
+    top = db.get_top_artists(conn, user_id)[:5]
+    artists = []
+    for name, _count in top:
+        d = db.get_artist_details(conn, name) or {}
+        artists.append(
+            {
+                "name": name,
+                "avatar": d.get("avatar_url"),
+                "genre": d.get("genre"),
+                "bio": d.get("bio"),
+                "listeners": d.get("listeners"),
+            }
+        )
     conn.close()
     return HTMLResponse(render_results_page(artists))
 

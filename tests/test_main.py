@@ -201,13 +201,16 @@ def test_root_redirects_to_login_when_not_logged_in():
     assert response.headers["location"] == "/login"
 
 
+def _artist(name, avatar=None, genre=None, bio=None, listeners=None):
+    return {"name": name, "avatar": avatar, "genre": genre, "bio": bio, "listeners": listeners}
+
+
 def test_render_results_page_lists_artists_in_order():
-    html_out = main.render_results_page([("Alpha", 5), ("Beta", 2)])
+    html_out = main.render_results_page([_artist("Alpha"), _artist("Beta")])
     assert "Alpha" in html_out
     assert "Beta" in html_out
-    # highest count appears before lower count in the document
+    # first artist appears before the second in the document
     assert html_out.index("Alpha") < html_out.index("Beta")
-    assert "5" in html_out and "2" in html_out
 
 
 def test_render_results_page_empty_state():
@@ -373,3 +376,27 @@ def test_home_uses_dark_theme(monkeypatch, tmp_path):
     _complete_fake_login(client, monkeypatch, tmp_path)
     body = client.get("/").text
     assert "#7c3aed" in body.lower() or "--primary" in body
+
+
+def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha"}]
+    )
+    db_module.upsert_artist_details(
+        conn, "Alpha", "http://av/a.jpg", "indie", "An artist bio.", 12345
+    )
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert "Alpha" in body
+    assert "indie" in body
+    assert "An artist bio." in body
+    assert "http://av/a.jpg" in body
+    assert "listeners" in body.lower()
