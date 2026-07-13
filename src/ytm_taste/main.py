@@ -30,19 +30,21 @@ def read_root():
     return {"status": "ok", "service": "ytm-taste"}
 
 
-def _build_flow():
+def _build_flow(code_verifier: str | None = None):
     return google_oauth.build_flow(
         os.environ["GOOGLE_WEB_CLIENT_ID"],
         os.environ["GOOGLE_WEB_CLIENT_SECRET"],
         REDIRECT_URI,
+        code_verifier=code_verifier,
     )
 
 
 @app.get("/login")
 def login(request: Request):
     flow = _build_flow()
-    authorization_url, state = google_oauth.get_authorization_url(flow)
+    authorization_url, state, code_verifier = google_oauth.get_authorization_url(flow)
     request.session["oauth_state"] = state
+    request.session["oauth_code_verifier"] = code_verifier
     return RedirectResponse(authorization_url)
 
 
@@ -51,9 +53,11 @@ def auth_callback(request: Request, background_tasks: BackgroundTasks):
     state = request.query_params.get("state")
     if state is None or state != request.session.get("oauth_state"):
         return HTMLResponse("Login failed: invalid or expired login attempt.", status_code=400)
+    code_verifier = request.session.get("oauth_code_verifier")
     request.session.pop("oauth_state", None)
+    request.session.pop("oauth_code_verifier", None)
 
-    flow = _build_flow()
+    flow = _build_flow(code_verifier=code_verifier)
     credentials = google_oauth.fetch_credentials(flow, str(request.url))
     youtube = youtube_client.build_youtube_client(credentials)
     channel_id = youtube_client.get_channel_id(youtube)
