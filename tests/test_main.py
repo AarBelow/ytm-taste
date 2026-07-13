@@ -288,3 +288,37 @@ def test_root_shows_empty_state_when_logged_in_with_no_liked_videos(monkeypatch,
     response = client.get("/")
     assert response.status_code == 200
     assert "synced yet" in response.text.lower()
+
+
+def test_home_page_links_to_recommendations(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    response = client.get("/")
+    assert "/recommendations" in response.text
+
+
+def test_recommendations_redirects_to_login_when_not_logged_in():
+    client = TestClient(main.app, follow_redirects=False)
+    response = client.get("/recommendations")
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/login"
+
+
+def test_recommendations_page_shows_recs_when_logged_in(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_recommendations(
+        conn, user_id, [("Boards of Canada", "Roygbiv", 3.0)]
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/recommendations")
+    assert response.status_code == 200
+    assert "Boards of Canada" in response.text
+    assert "Roygbiv" in response.text

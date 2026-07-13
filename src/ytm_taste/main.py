@@ -1,6 +1,7 @@
 # src/ytm_taste/main.py
 import html
 import os
+import urllib.parse
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -66,6 +67,49 @@ def render_results_page(artists: list[tuple[str, int]]) -> str:
 </head>
 <body>
 <h1>Your Top Artists</h1>
+<p><a href="/recommendations">Songs you might like &rarr;</a></p>
+{body}
+</body>
+</html>"""
+
+
+def render_recommendations_page(recs: list[tuple[str, str, float]]) -> str:
+    if not recs:
+        body = (
+            '<p class="empty">No recommendations yet — after you log in, the sync '
+            "generates them in the background; give it a moment and refresh.</p>"
+        )
+    else:
+        items = "\n".join(
+            f'<li><span class="artist">{html.escape(artist)}</span>'
+            f'<span class="track">{html.escape(track)}</span>'
+            f'<a class="yt" target="_blank" '
+            f'href="https://www.youtube.com/results?search_query='
+            f'{urllib.parse.quote(artist + " " + track)}">search</a></li>'
+            for artist, track, _score in recs
+        )
+        body = f'<ol class="recs">{items}</ol>'
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Songs You Might Like</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; max-width: 640px;
+         margin: 2rem auto; padding: 0 1rem; }}
+  h1 {{ font-size: 1.5rem; }}
+  ol.recs {{ list-style: none; padding: 0; }}
+  ol.recs li {{ display: flex; align-items: baseline; gap: 0.75rem;
+                padding: 0.35rem 0; border-bottom: 1px solid #8883; }}
+  .artist {{ font-weight: 600; }}
+  .track {{ flex: 1; opacity: 0.85; }}
+  .empty {{ opacity: 0.7; }}
+</style>
+</head>
+<body>
+<h1>Songs You Might Like</h1>
+<p><a href="/">&larr; back to your top artists</a></p>
 {body}
 </body>
 </html>"""
@@ -81,6 +125,18 @@ def read_root(request: Request):
     artists = db.get_top_artists(conn, user_id)
     conn.close()
     return HTMLResponse(render_results_page(artists))
+
+
+@app.get("/recommendations")
+def recommendations_page(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return RedirectResponse("/login")
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    recs = db.get_recommendations(conn, user_id)
+    conn.close()
+    return HTMLResponse(render_recommendations_page(recs))
 
 
 def _build_flow(code_verifier: str | None = None):
@@ -128,6 +184,9 @@ def auth_callback(request: Request, background_tasks: BackgroundTasks):
     conn.close()
 
     request.session["user_id"] = user_id
-    background_tasks.add_task(sync.run_sync, DB_PATH, user_id, youtube)
+    background_tasks.add_task(
+        sync.run_sync, DB_PATH, user_id, youtube,
+        lastfm_api_key=os.environ.get("LASTFM_API_KEY"),
+    )
 
     return RedirectResponse("/")
