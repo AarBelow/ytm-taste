@@ -93,6 +93,31 @@ def test_fetch_artist_info_skips_junk_tags_and_returns_full_bio():
     assert result["bio"] == "Potsu is a Lo-Fi producer. A longer full bio."
 
 
+def test_fetch_artist_info_joins_up_to_two_genres():
+    data = {
+        "artist": {
+            "stats": {"listeners": "1"},
+            "bio": {"content": "x"},
+            # "japanese" is geographic junk; "nu jazz" and "lo-fi" are both real genres
+            "tags": {"tag": [{"name": "nu jazz"}, {"name": "japanese"}, {"name": "lo-fi"}]},
+        }
+    }
+    result = lastfm_client.fetch_artist_info("K", "potsu", get_fn=make_get(data, []))
+    assert result["genre"] == "nu jazz / lo-fi"
+
+
+def test_fetch_artist_info_single_genre_when_only_one_matches():
+    data = {
+        "artist": {
+            "stats": {"listeners": "1"},
+            "bio": {"content": "x"},
+            "tags": {"tag": [{"name": "text"}, {"name": "canadian"}, {"name": "Lo-Fi"}]},
+        }
+    }
+    result = lastfm_client.fetch_artist_info("K", "x", get_fn=make_get(data, []))
+    assert result["genre"] == "Lo-Fi"
+
+
 def test_fetch_artist_info_genre_none_when_no_genre_tag():
     data = {
         "artist": {

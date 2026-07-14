@@ -48,13 +48,22 @@ def _clean_bio(text: str) -> str:
     return text.split("Read more on Last.fm")[0].strip()
 
 
-def _pick_genre(tags) -> str | None:
-    # Pick the first tag that is a real music genre, skipping junk/geographic tags.
+def _pick_genres(tags, limit=2) -> str | None:
+    # Pick up to `limit` real music-genre tags (skipping junk/geographic ones),
+    # preserving Last.fm's tag order, joined with " / " (e.g. "nu jazz / lo-fi").
+    picked: list[str] = []
+    seen: set[str] = set()
     for t in tags:
         name = t.get("name") if isinstance(t, dict) else None
-        if name and name.lower() in GENRES:
-            return name
-    return None
+        if not name:
+            continue
+        low = name.lower()
+        if low in GENRES and low not in seen:
+            picked.append(name)
+            seen.add(low)
+            if len(picked) >= limit:
+                break
+    return " / ".join(picked) if picked else None
 
 
 def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
@@ -75,7 +84,7 @@ def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
     tags = a.get("tags", {}).get("tag", [])
     if isinstance(tags, dict):
         tags = [tags]
-    genre = _pick_genre(tags)
+    genre = _pick_genres(tags)
     bio_raw = a.get("bio", {}).get("content") or a.get("bio", {}).get("summary", "")
     bio = _clean_bio(bio_raw) or None
     listeners_raw = a.get("stats", {}).get("listeners")
