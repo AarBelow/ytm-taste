@@ -108,6 +108,43 @@ a:hover{text-decoration:underline}
   letter-spacing:.04em;margin:0 0 .4rem}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
+.landing{min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:1rem;padding:2rem 0;position:relative;animation:cardIn .6s ease backwards}
+.landing::before{content:"";position:absolute;top:8%;left:50%;width:min(680px,90%);height:340px;
+  transform:translateX(-50%);background:radial-gradient(closest-side,rgba(124,58,237,.35),transparent);
+  filter:blur(30px);z-index:-1;pointer-events:none}
+.eyebrow2{margin:0;text-transform:uppercase;letter-spacing:.28em;font-size:.72rem;color:var(--muted)}
+.wordmark{font-family:'Righteous',cursive;font-weight:400;font-size:clamp(3rem,10vw,5.5rem);
+  line-height:1;margin:.25rem 0;background:linear-gradient(100deg,var(--primary-glow),#e9d5ff 60%,
+  var(--primary));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{margin:0;font-size:clamp(1.3rem,3vw,1.9rem);font-weight:600;color:var(--fg)}
+.lead-sub{margin:0;max-width:34rem;color:var(--muted)}
+.eq{display:flex;align-items:flex-end;gap:.35rem;height:56px;margin:.6rem 0}
+.eq span{width:8px;height:16px;border-radius:4px;
+  background:linear-gradient(var(--primary-glow),var(--primary));animation:eqBounce 1s ease-in-out
+  infinite}
+.eq span:nth-child(1){animation-delay:-.9s}.eq span:nth-child(2){animation-delay:-.7s}
+.eq span:nth-child(3){animation-delay:-.5s}.eq span:nth-child(4){animation-delay:-.3s}
+.eq span:nth-child(5){animation-delay:-.6s}.eq span:nth-child(6){animation-delay:-.2s}
+.eq span:nth-child(7){animation-delay:-.4s}
+@keyframes eqBounce{0%,100%{height:14px}50%{height:52px}}
+.cta{display:inline-block;margin:.4rem 0 .6rem;padding:.85rem 2rem;background:var(--primary);
+  color:#fff;border-radius:999px;font-weight:600;box-shadow:0 8px 30px rgba(124,58,237,.4);
+  transition:background .2s,box-shadow .2s,transform .2s}
+.cta:hover{background:var(--primary-glow);text-decoration:none;transform:translateY(-2px);
+  box-shadow:0 10px 34px rgba(168,85,247,.55)}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin-top:1.25rem;
+  width:100%;max-width:640px}
+.tile{display:flex;flex-direction:column;align-items:center;gap:.35rem;padding:1.25rem 1rem;
+  background:var(--surface);border:1px solid var(--border);border-radius:16px;color:var(--fg);
+  transition:transform .2s,box-shadow .2s,border-color .2s}
+.tile:hover{transform:translateY(-3px);border-color:var(--primary-glow);text-decoration:none;
+  box-shadow:0 0 22px rgba(124,58,237,.4)}
+.tile-ic{font-size:1.6rem}
+.tile-h{font-weight:600}
+.tile-p{font-size:.82rem;color:var(--muted)}
+@media (max-width:560px){.tiles{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.eq span{animation:none;height:32px}.landing{animation:none}}
 """
 
 # Painterly page background: faded purple brush strokes given a bristly, dragged-brush

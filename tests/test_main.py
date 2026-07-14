@@ -608,3 +608,9 @@ def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
     body = client.get("/artists").text
     assert "Alpha" in body
     assert "youtube.com/channel/" not in body
+
+
+def test_base_styles_includes_landing_and_equalizer():
+    assert "@keyframes eqBounce" in main.BASE_STYLES
+    assert ".wordmark" in main.BASE_STYLES
+    assert ".tile" in main.BASE_STYLES
