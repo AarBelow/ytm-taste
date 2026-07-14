@@ -415,3 +415,47 @@ def test_run_sync_populates_artist_details(tmp_path):
         "listeners": 100,
         "album_art_url": "http://a/alb.jpg",
     }
+
+
+def test_run_sync_clears_syncing_flag_on_success(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+    conn = db.get_connection(db_path)
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
+
+    sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+    )
+    conn = db.get_connection(db_path)
+    assert db.is_sync_ready(conn, user_id) is True
+
+
+def test_run_sync_clears_syncing_flag_on_core_failure(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+    conn = db.get_connection(db_path)
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
+
+    def boom(yt):
+        raise RuntimeError("liked fetch failed")
+
+    with pytest.raises(RuntimeError):
+        sync.run_sync(
+            db_path, user_id, youtube=object(),
+            fetch_liked_videos_fn=boom,
+            fetch_playlists_fn=lambda yt: [],
+            fetch_playlist_items_fn=lambda yt, pid: [],
+            fetch_subscriptions_fn=lambda yt: [],
+            fetch_video_details_fn=lambda yt, ids: {},
+        )
+    conn = db.get_connection(db_path)
+    assert db.is_sync_ready(conn, user_id) is True  # finally cleared the flag
