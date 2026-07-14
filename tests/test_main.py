@@ -398,7 +398,8 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     assert "Alpha" in body
     assert "indie" in body
     assert "An artist bio." in body
-    assert "http://av/a.jpg" in body
+    # avatar is served through our proxy, not hotlinked from Google
+    assert "/artist-avatar?artist=Alpha" in body
     assert "listeners" in body.lower()
     assert "http://alb/a.jpg" in body
     assert "background-image" in body
@@ -422,6 +423,71 @@ def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
 
     body = client.get("/").text
     assert "https://www.youtube.com/channel/UC_alpha" in body
+
+
+def test_artist_avatar_proxy_serves_fetched_bytes(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    db_module.upsert_artist_details(conn, "Alpha", "http://av/a.jpg", None, None, None)
+    conn.commit()
+    conn.close()
+
+    class FakeResp:
+        headers = {"Content-Type": "image/png"}
+        content = b"PNGDATA"
+
+    monkeypatch.setattr(main, "_avatar_cache", {})
+    monkeypatch.setattr(main.requests, "get", lambda url, timeout=10: FakeResp())
+
+    r = client.get("/artist-avatar?artist=Alpha")
+    assert r.status_code == 200
+    assert r.content == b"PNGDATA"
+    assert r.headers["content-type"].startswith("image/png")
+
+
+def test_artist_avatar_proxy_caches_after_first_fetch(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    db_module.upsert_artist_details(conn, "Alpha", "http://av/a.jpg", None, None, None)
+    conn.commit()
+    conn.close()
+
+    calls = {"n": 0}
+
+    class FakeResp:
+        headers = {"Content-Type": "image/jpeg"}
+        content = b"JPEGDATA"
+
+    def fake_get(url, timeout=10):
+        calls["n"] += 1
+        return FakeResp()
+
+    monkeypatch.setattr(main, "_avatar_cache", {})
+    monkeypatch.setattr(main.requests, "get", fake_get)
+
+    client.get("/artist-avatar?artist=Alpha")
+    client.get("/artist-avatar?artist=Alpha")
+    assert calls["n"] == 1  # second request served from cache
+
+
+def test_artist_avatar_proxy_404_when_no_avatar(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    db_module.upsert_artist_details(conn, "Alpha", None, None, None, None)
+    conn.commit()
+    conn.close()
+
+    r = client.get("/artist-avatar?artist=Alpha")
+    assert r.status_code == 404
 
 
 def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):

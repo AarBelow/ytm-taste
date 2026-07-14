@@ -1,11 +1,13 @@
 # src/ytm_taste/main.py
 import html
 import os
+import urllib.parse
 from datetime import datetime, timezone
 
+import requests
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
 from ytm_taste import db, google_oauth, sync, youtube_client
@@ -107,6 +109,44 @@ def health():
     return {"status": "ok", "service": "ytm-taste"}
 
 
+# Cache of proxied artist avatars, keyed by source URL: {url: (content_type, bytes)}.
+# YouTube throttles hotlinked yt3.ggpht.com avatars (429), so we fetch each once
+# server-side (not rate-limited at our volume) and serve the bytes ourselves.
+_avatar_cache: dict[str, tuple[str, bytes]] = {}
+
+
+def _fetch_avatar_bytes(url: str) -> tuple[str, bytes]:
+    cached = _avatar_cache.get(url)
+    if cached is not None:
+        return cached
+    resp = requests.get(url, timeout=10)
+    content_type = resp.headers.get("Content-Type", "image/jpeg")
+    result = (content_type, resp.content)
+    _avatar_cache[url] = result
+    return result
+
+
+@app.get("/artist-avatar")
+def artist_avatar(artist: str):
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    details = db.get_artist_details(conn, artist) or {}
+    conn.close()
+    url = details.get("avatar_url")
+    if not url:
+        return Response(status_code=404)
+    try:
+        content_type, data = _fetch_avatar_bytes(url)
+    except Exception:
+        # Best-effort fallback: let the browser try the original URL directly.
+        return RedirectResponse(url)
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 def render_results_page(artists) -> str:
     if not artists:
         body = (
@@ -121,7 +161,8 @@ def render_results_page(artists) -> str:
     for a in artists:
         name = html.escape(a["name"])
         if a["avatar"]:
-            avatar = f'<img class="avatar" src="{html.escape(a["avatar"])}" alt="">'
+            proxied = "/artist-avatar?artist=" + urllib.parse.quote(a["name"])
+            avatar = f'<img class="avatar" src="{html.escape(proxied)}" alt="">'
         else:
             initial = html.escape(a["name"][:1].upper() or "?")
             avatar = f'<div class="avatar avatar-ph">{initial}</div>'
