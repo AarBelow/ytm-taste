@@ -389,7 +389,7 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
         conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha"}]
     )
     db_module.upsert_artist_details(
-        conn, "Alpha", "http://av/a.jpg", "indie", "An artist bio.", 12345
+        conn, "Alpha", "http://av/a.jpg", "indie", "An artist bio.", 12345, "http://alb/a.jpg"
     )
     conn.commit()
     conn.close()
@@ -400,3 +400,5 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     assert "An artist bio." in body
     assert "http://av/a.jpg" in body
     assert "listeners" in body.lower()
+    assert "http://alb/a.jpg" in body
+    assert "background-image" in body

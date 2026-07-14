@@ -31,7 +31,7 @@ BASE_STYLES = """
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
   font-family:'Poppins',system-ui,sans-serif;line-height:1.6}
-.container{max-width:760px;margin:0 auto;padding:2.5rem 1.25rem}
+.container{width:70%;max-width:1400px;margin:0 auto;padding:2.5rem 1.25rem}
 h1{font-family:'Righteous',system-ui,cursive;font-weight:400;font-size:2rem;margin:0 0 .5rem;
   background:linear-gradient(90deg,var(--primary-glow),#e9d5ff);
   -webkit-background-clip:text;background-clip:text;color:transparent}
@@ -68,6 +68,7 @@ a:hover{text-decoration:underline}
 .more-btn:hover{background:var(--primary-glow);box-shadow:0 0 18px rgba(168,85,247,.5)}
 .profiles{list-style:none;padding:0;margin:1.5rem 0;display:flex;flex-direction:column;gap:1rem}
 .profile{display:flex;align-items:center;gap:1.25rem;background:var(--surface);
+  background-size:cover;background-position:center;
   border:1px solid var(--border);border-radius:20px;padding:1.25rem 1.5rem}
 .profile:nth-child(even){flex-direction:row-reverse;text-align:right}
 .avatar{width:84px;height:84px;border-radius:50%;object-fit:cover;flex:0 0 auto;
@@ -126,8 +127,16 @@ def render_results_page(artists) -> str:
             fact = f'<p class="p-fact">{a["listeners"]:,} listeners on Last.fm</p>'
         else:
             fact = ""
+        if a.get("album"):
+            overlay = "rgba(23,17,48,.86)"
+            style = (
+                f' style="background-image:linear-gradient({overlay},{overlay}),'
+                f"url('{html.escape(a['album'])}')\""
+            )
+        else:
+            style = ""
         cards.append(
-            f'<li class="profile">{avatar}'
+            f'<li class="profile"{style}>{avatar}'
             f'<div class="p-body"><p class="p-name">{name}</p>{genre}{bio}{fact}</div></li>'
         )
     body = (
@@ -215,6 +224,7 @@ def read_root(request: Request):
                 "genre": d.get("genre"),
                 "bio": d.get("bio"),
                 "listeners": d.get("listeners"),
+                "album": d.get("album_art_url"),
             }
         )
     conn.close()
