@@ -276,7 +276,6 @@ def test_run_sync_generates_and_stores_recommendations(tmp_path):
         fetch_song_meta_fn=fetch_meta,
         fetch_channel_avatars_fn=lambda yt, ids: {},
         fetch_artist_info_fn=lambda k, a: None,
-        sleep_fn=lambda s: None,
     )
     assert summary["recommendations"] == 1
 
@@ -308,7 +307,6 @@ def test_run_sync_stores_recommendation_without_meta_when_itunes_misses(tmp_path
         fetch_song_meta_fn=lambda a, t: None,
         fetch_channel_avatars_fn=lambda yt, ids: {},
         fetch_artist_info_fn=lambda k, a: None,
-        sleep_fn=lambda s: None,
     )
     assert summary["recommendations"] == 1
     conn = db.get_connection(db_path)
@@ -363,7 +361,6 @@ def test_run_sync_lastfm_failure_does_not_roll_back_youtube_data(tmp_path):
         fetch_similar_fn=boom,
         fetch_channel_avatars_fn=lambda yt, ids: {},
         fetch_artist_info_fn=lambda k, a: None,
-        sleep_fn=lambda s: None,
     )
     assert summary["liked_videos"] == 1
     assert summary["recommendations"] == 0
@@ -407,7 +404,6 @@ def test_run_sync_populates_artist_details(tmp_path):
         fetch_song_meta_fn=lambda a, t: None,
         fetch_channel_avatars_fn=avatars,
         fetch_artist_info_fn=artist_info,
-        sleep_fn=lambda s: None,
     )
     conn = db.get_connection(db_path)
     details = db.get_artist_details(conn, "Alpha")

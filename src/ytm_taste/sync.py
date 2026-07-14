@@ -1,10 +1,14 @@
 import time
 from datetime import datetime, timezone
 
-from ytm_taste import db, itunes_client, lastfm_client, recommendations, youtube_client
-
-RATE_LIMIT_DELAY = 0.25
-ITUNES_DELAY = 0.3
+from ytm_taste import (
+    concurrency,
+    db,
+    itunes_client,
+    lastfm_client,
+    recommendations,
+    youtube_client,
+)
 
 
 def run_sync(
@@ -18,7 +22,6 @@ def run_sync(
     fetch_video_details_fn=youtube_client.fetch_video_details,
     lastfm_api_key=None,
     fetch_similar_fn=lastfm_client.fetch_similar_tracks,
-    sleep_fn=time.sleep,
     fetch_song_meta_fn=itunes_client.fetch_song_meta,
     fetch_channel_avatars_fn=youtube_client.fetch_channel_avatars,
     fetch_artist_info_fn=lastfm_client.fetch_artist_info,
@@ -33,8 +36,11 @@ def run_sync(
 
         liked_videos = fetch_liked_videos_fn(youtube)
         playlists = fetch_playlists_fn(youtube)
-        for playlist in playlists:
-            playlist["items"] = fetch_playlist_items_fn(youtube, playlist["playlist_id"])
+        items_by_playlist = concurrency.run_concurrently(
+            lambda pl: fetch_playlist_items_fn(youtube, pl["playlist_id"]), playlists
+        )
+        for playlist, items in zip(playlists, items_by_playlist):
+            playlist["items"] = items
 
         all_video_ids = [
             item["video_id"] for playlist in playlists for item in playlist["items"]
@@ -66,19 +72,22 @@ def run_sync(
             clean = db.get_clean_seed_songs(conn, user_id)
             top = db.get_top_artists(conn, user_id)
             seeds = recommendations.select_seeds(clean, top)
-            similar_by_seed = []
-            for artist, track in seeds:
-                similar_by_seed.append(fetch_similar_fn(lastfm_api_key, artist, track))
-                sleep_fn(RATE_LIMIT_DELAY)
+            similar_by_seed = concurrency.run_concurrently(
+                lambda s: fetch_similar_fn(lastfm_api_key, s[0], s[1]), seeds
+            )
             owned = db.get_owned_song_keys(conn, user_id)
             recs = recommendations.rank(similar_by_seed, owned)
-            enriched = []
-            for artist, track, score in recs:
-                meta = fetch_song_meta_fn(artist, track)
-                sleep_fn(ITUNES_DELAY)
-                image_url = meta["image_url"] if meta else None
-                preview_url = meta["preview_url"] if meta else None
-                enriched.append((artist, track, score, image_url, preview_url))
+            metas = concurrency.run_concurrently(lambda r: fetch_song_meta_fn(r[0], r[1]), recs)
+            enriched = [
+                (
+                    artist,
+                    track,
+                    score,
+                    meta["image_url"] if meta else None,
+                    meta["preview_url"] if meta else None,
+                )
+                for (artist, track, score), meta in zip(recs, metas)
+            ]
             db.replace_recommendations(conn, user_id, enriched)
             conn.commit()
             recommendation_count = len(enriched)
@@ -91,13 +100,15 @@ def run_sync(
         channels = db.get_top_artist_channels(conn, user_id)
         wanted = [channels[name] for name, _c in top_artists if name in channels]
         avatars = fetch_channel_avatars_fn(youtube, wanted) if wanted else {}
-        for name, _count in top_artists:
+        if lastfm_api_key:
+            infos = concurrency.run_concurrently(
+                lambda a: fetch_artist_info_fn(lastfm_api_key, a[0]), top_artists
+            )
+        else:
+            infos = [None] * len(top_artists)
+        for (name, _count), info in zip(top_artists, infos):
             channel_id = channels.get(name)
             avatar = avatars.get(channel_id) if channel_id else None
-            info = None
-            if lastfm_api_key:
-                info = fetch_artist_info_fn(lastfm_api_key, name)
-                sleep_fn(RATE_LIMIT_DELAY)
             info = info or {}
             db.upsert_artist_details(
                 conn, name, avatar, info.get("genre"), info.get("bio"), info.get("listeners")
