@@ -67,10 +67,14 @@ a:hover{text-decoration:underline}
   cursor:pointer;transition:background .2s,box-shadow .2s}
 .more-btn:hover{background:var(--primary-glow);box-shadow:0 0 18px rgba(168,85,247,.5)}
 .profiles{list-style:none;padding:0;margin:1.5rem 0;display:flex;flex-direction:column;gap:1rem}
-.profile{display:flex;align-items:center;gap:1.25rem;background:var(--surface);
+.profile{position:relative;display:flex;align-items:center;gap:1.25rem;background:var(--surface);
   background-size:cover;background-position:center;
   border:1px solid var(--border);border-radius:20px;padding:1.25rem 1.5rem}
 .profile:nth-child(even){flex-direction:row-reverse;text-align:right}
+.profile.linkable{cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s}
+.profile.linkable:hover{transform:translateY(-3px);border-color:var(--primary-glow);
+  box-shadow:0 0 22px rgba(124,58,237,.4)}
+.card-link{position:absolute;inset:0;border-radius:20px;z-index:1}
 .avatar{width:84px;height:84px;border-radius:50%;object-fit:cover;flex:0 0 auto;
   background:var(--surface-2);border:2px solid var(--primary-glow)}
 .avatar-ph{display:flex;align-items:center;justify-content:center;
@@ -135,8 +139,18 @@ def render_results_page(artists) -> str:
             )
         else:
             style = ""
+        if a.get("channel_id"):
+            url = f"https://www.youtube.com/channel/{html.escape(a['channel_id'])}"
+            link = (
+                f'<a class="card-link" href="{url}" target="_blank" rel="noopener" '
+                f'aria-label="Open {name} on YouTube"></a>'
+            )
+            cls = "profile linkable"
+        else:
+            link = ""
+            cls = "profile"
         cards.append(
-            f'<li class="profile"{style}>{avatar}'
+            f'<li class="{cls}"{style}>{link}{avatar}'
             f'<div class="p-body"><p class="p-name">{name}</p>{genre}{bio}{fact}</div></li>'
         )
     body = (
@@ -214,6 +228,7 @@ def read_root(request: Request):
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
     top = db.get_top_artists(conn, user_id)[:5]
+    channels = db.get_top_artist_channels(conn, user_id)
     artists = []
     for name, _count in top:
         d = db.get_artist_details(conn, name) or {}
@@ -225,6 +240,7 @@ def read_root(request: Request):
                 "bio": d.get("bio"),
                 "listeners": d.get("listeners"),
                 "album": d.get("album_art_url"),
+                "channel_id": channels.get(name),
             }
         )
     conn.close()

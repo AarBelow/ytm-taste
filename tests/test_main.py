@@ -402,3 +402,41 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     assert "listeners" in body.lower()
     assert "http://alb/a.jpg" in body
     assert "background-image" in body
+
+
+def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_liked_videos(
+        conn,
+        user_id,
+        [{"video_id": "v1", "title": "s", "channel_title": "Alpha", "channel_id": "UC_alpha"}],
+    )
+    db_module.upsert_artist_details(conn, "Alpha", None, None, None, None)
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert "https://www.youtube.com/channel/UC_alpha" in body
+
+
+def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha"}]
+    )
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert "Alpha" in body
+    assert "youtube.com/channel/" not in body
