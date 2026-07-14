@@ -337,13 +337,33 @@ def test_get_top_artist_channels_maps_normalized_name_to_channel_id():
 
 def test_upsert_and_get_artist_details_round_trip():
     conn = make_conn()
-    db.upsert_artist_details(conn, "potsu", "http://a/p.jpg", "Lo-Fi", "A producer.", 741785)
+    db.upsert_artist_details(
+        conn, "potsu", "http://a/p.jpg", "Lo-Fi", "A producer.", 741785, "http://a/alb.jpg"
+    )
     assert db.get_artist_details(conn, "potsu") == {
         "avatar_url": "http://a/p.jpg",
         "genre": "Lo-Fi",
         "bio": "A producer.",
         "listeners": 741785,
+        "album_art_url": "http://a/alb.jpg",
     }
     db.upsert_artist_details(conn, "potsu", None, "chill", "Updated.", 1)
     assert db.get_artist_details(conn, "potsu")["bio"] == "Updated."
+    assert db.get_artist_details(conn, "potsu")["album_art_url"] is None
     assert db.get_artist_details(conn, "missing") is None
+
+
+def test_init_db_adds_album_art_url_to_legacy_artist_details():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE artist_details ("
+        "artist_name TEXT PRIMARY KEY, avatar_url TEXT, genre TEXT, bio TEXT, listeners INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO artist_details (artist_name, avatar_url) VALUES ('potsu', 'http://a/p.jpg')"
+    )
+    conn.commit()
+    db.init_db(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
+    assert "album_art_url" in cols
+    assert db.get_artist_details(conn, "potsu")["avatar_url"] == "http://a/p.jpg"

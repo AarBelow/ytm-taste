@@ -73,10 +73,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             avatar_url TEXT,
             genre TEXT,
             bio TEXT,
-            listeners INTEGER
+            listeners INTEGER,
+            album_art_url TEXT
         );
         """
     )
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
+    if "album_art_url" not in cols:
+        conn.execute("ALTER TABLE artist_details ADD COLUMN album_art_url TEXT")
     conn.commit()
 
 
@@ -285,21 +289,31 @@ def get_top_artist_channels(conn: sqlite3.Connection, user_id: int) -> dict:
     return mapping
 
 
-def upsert_artist_details(conn, artist_name, avatar_url, genre, bio, listeners) -> None:
+def upsert_artist_details(
+    conn, artist_name, avatar_url, genre, bio, listeners, album_art_url=None
+) -> None:
     conn.execute(
-        "INSERT INTO artist_details (artist_name, avatar_url, genre, bio, listeners) "
-        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(artist_name) DO UPDATE SET "
+        "INSERT INTO artist_details "
+        "(artist_name, avatar_url, genre, bio, listeners, album_art_url) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(artist_name) DO UPDATE SET "
         "avatar_url=excluded.avatar_url, genre=excluded.genre, bio=excluded.bio, "
-        "listeners=excluded.listeners",
-        (artist_name, avatar_url, genre, bio, listeners),
+        "listeners=excluded.listeners, album_art_url=excluded.album_art_url",
+        (artist_name, avatar_url, genre, bio, listeners, album_art_url),
     )
 
 
 def get_artist_details(conn, artist_name) -> dict | None:
     row = conn.execute(
-        "SELECT avatar_url, genre, bio, listeners FROM artist_details WHERE artist_name = ?",
+        "SELECT avatar_url, genre, bio, listeners, album_art_url "
+        "FROM artist_details WHERE artist_name = ?",
         (artist_name,),
     ).fetchone()
     if row is None:
         return None
-    return {"avatar_url": row[0], "genre": row[1], "bio": row[2], "listeners": row[3]}
+    return {
+        "avatar_url": row[0],
+        "genre": row[1],
+        "bio": row[2],
+        "listeners": row[3],
+        "album_art_url": row[4],
+    }
