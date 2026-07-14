@@ -36,11 +36,9 @@ def run_sync(
 
         liked_videos = fetch_liked_videos_fn(youtube)
         playlists = fetch_playlists_fn(youtube)
-        items_by_playlist = concurrency.run_concurrently(
-            lambda pl: fetch_playlist_items_fn(youtube, pl["playlist_id"]), playlists
-        )
-        for playlist, items in zip(playlists, items_by_playlist):
-            playlist["items"] = items
+        # Sequential: shares the non-thread-safe googleapiclient `youtube` object.
+        for playlist in playlists:
+            playlist["items"] = fetch_playlist_items_fn(youtube, playlist["playlist_id"])
 
         all_video_ids = [
             item["video_id"] for playlist in playlists for item in playlist["items"]

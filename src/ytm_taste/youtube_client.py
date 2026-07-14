@@ -1,8 +1,6 @@
 # src/ytm_taste/youtube_client.py
 from googleapiclient.discovery import build
 
-from ytm_taste.concurrency import run_concurrently
-
 MUSIC_CATEGORY_ID = "10"
 
 
@@ -107,23 +105,21 @@ def fetch_subscriptions(youtube) -> list[dict]:
 
 
 def fetch_video_details(youtube, video_ids: list[str]) -> dict[str, dict]:
-    batches = [video_ids[i : i + 50] for i in range(0, len(video_ids), 50)]
-
-    def fetch_batch(batch):
+    # NOTE: sequential on purpose — the googleapiclient `youtube` object shares a
+    # single non-thread-safe httplib2 connection, so concurrent calls through it
+    # corrupt the SSL stream (RECORD_LAYER_FAILURE). Only requests-based calls
+    # (Last.fm, iTunes) are parallelized in sync.py.
+    details: dict[str, dict] = {}
+    for start in range(0, len(video_ids), 50):
+        batch = video_ids[start : start + 50]
         response = youtube.videos().list(part="snippet", id=",".join(batch)).execute()
-        result = {}
         for item in response.get("items", []):
             snippet = item["snippet"]
-            result[item["id"]] = {
+            details[item["id"]] = {
                 "channel_title": snippet.get("channelTitle"),
                 "category_id": snippet.get("categoryId"),
                 "channel_id": snippet.get("channelId"),
             }
-        return result
-
-    details: dict[str, dict] = {}
-    for batch_result in run_concurrently(fetch_batch, batches):
-        details.update(batch_result)
     return details
 
 
