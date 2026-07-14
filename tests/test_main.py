@@ -425,9 +425,44 @@ def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
     assert "https://www.youtube.com/channel/UC_alpha" in body
 
 
+def test_home_renders_hero_and_ranked_list(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    # Alpha appears twice, Beta once -> Alpha is the top (hero), Beta is ranked.
+    db_module.replace_liked_videos(
+        conn,
+        user_id,
+        [
+            {"video_id": "v1", "title": "s1", "channel_title": "Alpha"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Alpha"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Beta"},
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert 'class="profile hero"' in body
+    assert 'class="ranked"' in body
+    assert body.count("Most played") == 1  # only the hero carries the eyebrow
+    # hero (Alpha) is rendered above the ranked list (Beta)
+    assert body.index("Alpha") < body.index("Beta")
+
+
 def test_base_styles_includes_painterly_background():
     assert "data:image/svg+xml;base64," in main.BASE_STYLES
     assert "background-attachment:fixed" in main.BASE_STYLES
+
+
+def test_base_styles_includes_staggered_card_animation():
+    assert "@keyframes cardIn" in main.BASE_STYLES
+    assert "animation-delay" in main.BASE_STYLES
+    # motion-sensitive users get no entrance animation
+    assert "prefers-reduced-motion" in main.BASE_STYLES
 
 
 def test_artist_avatar_proxy_serves_fetched_bytes(monkeypatch, tmp_path):

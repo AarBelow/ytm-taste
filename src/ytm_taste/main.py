@@ -69,11 +69,31 @@ a:hover{text-decoration:underline}
   color:#fff;border:none;border-radius:999px;font-family:'Poppins';font-weight:600;
   cursor:pointer;transition:background .2s,box-shadow .2s}
 .more-btn:hover{background:var(--primary-glow);box-shadow:0 0 18px rgba(168,85,247,.5)}
-.profiles{list-style:none;padding:0;margin:1.5rem 0;display:flex;flex-direction:column;gap:1rem}
 .profile{position:relative;display:flex;align-items:center;gap:1.25rem;background:var(--surface);
   background-size:cover;background-position:center;
   border:1px solid var(--border);border-radius:20px;padding:1.25rem 1.5rem}
-.profile:nth-child(even){flex-direction:row-reverse;text-align:right}
+.eyebrow{display:flex;align-items:center;gap:.55rem;margin:0 0 .4rem;font-size:.72rem;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--primary-glow)}
+.eyebrow::before{content:"";width:1.6rem;height:2px;border-radius:2px;background:var(--primary-glow)}
+.hero{margin:1.5rem 0;padding:1.9rem 2rem;gap:1.9rem;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.hero .avatar{width:132px;height:132px;border-width:3px}
+.hero .p-name{font-size:2rem;margin-bottom:.25rem}
+.hero .p-bio{font-size:.95rem}
+.ranked{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.75rem}
+.rank-item{padding:1rem 1.25rem;gap:1rem}
+.rank-item .avatar{width:60px;height:60px}
+.rank-item .p-name{font-size:1.1rem}
+.rank-item .p-bio{font-size:.85rem}
+@media (max-width:600px){.hero{flex-direction:column;text-align:center;gap:1.1rem}
+  .hero .avatar{width:104px;height:104px}.hero .eyebrow{justify-content:center}}
+@keyframes cardIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.profile{animation:cardIn .55s ease backwards}
+.hero{animation-delay:.05s}
+.ranked li:nth-child(1){animation-delay:.20s}
+.ranked li:nth-child(2){animation-delay:.32s}
+.ranked li:nth-child(3){animation-delay:.44s}
+.ranked li:nth-child(4){animation-delay:.56s}
+@media (prefers-reduced-motion:reduce){.profile{animation:none}}
 .profile.linkable{cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s}
 .profile.linkable:hover{transform:translateY(-3px);border-color:var(--primary-glow);
   box-shadow:0 0 22px rgba(124,58,237,.4)}
@@ -202,50 +222,60 @@ def render_results_page(artists) -> str:
         )
         return _html_page("Your Top Artists", body)
 
-    cards = []
-    for a in artists:
-        name = html.escape(a["name"])
-        if a["avatar"]:
-            proxied = "/artist-avatar?artist=" + urllib.parse.quote(a["name"])
-            avatar = f'<img class="avatar" src="{html.escape(proxied)}" alt="">'
-        else:
-            initial = html.escape(a["name"][:1].upper() or "?")
-            avatar = f'<div class="avatar avatar-ph">{initial}</div>'
-        genre = f'<p class="p-genre">{html.escape(a["genre"])}</p>' if a["genre"] else ""
-        bio = f'<p class="p-bio">{html.escape(a["bio"])}</p>' if a["bio"] else ""
-        if a["listeners"]:
-            fact = f'<p class="p-fact">{a["listeners"]:,} listeners on Last.fm</p>'
-        else:
-            fact = ""
-        if a.get("album"):
-            overlay = "rgba(23,17,48,.86)"
-            style = (
-                f' style="background-image:linear-gradient({overlay},{overlay}),'
-                f"url('{html.escape(a['album'])}')\""
-            )
-        else:
-            style = ""
-        if a.get("channel_id"):
-            url = f"https://www.youtube.com/channel/{html.escape(a['channel_id'])}"
-            link = (
-                f'<a class="card-link" href="{url}" target="_blank" rel="noopener" '
-                f'aria-label="Open {name} on YouTube"></a>'
-            )
-            cls = "profile linkable"
-        else:
-            link = ""
-            cls = "profile"
-        cards.append(
-            f'<li class="{cls}"{style}>{link}{avatar}'
-            f'<div class="p-body"><p class="p-name">{name}</p>{genre}{bio}{fact}</div></li>'
-        )
+    hero = _artist_card(artists[0], hero=True)
+    ranked = "".join(_artist_card(a, hero=False) for a in artists[1:])
+    ranked_block = f'<ul class="ranked">{ranked}</ul>' if ranked else ""
     body = (
         "<h1>Your Top Artists</h1>"
         '<p class="sub">Your most-played artists across likes and playlists.</p>'
-        f'<ul class="profiles">{"".join(cards)}</ul>'
+        f"{hero}{ranked_block}"
         '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
     )
     return _html_page("Your Top Artists", body)
+
+
+def _artist_card(a, hero: bool) -> str:
+    name = html.escape(a["name"])
+    if a["avatar"]:
+        proxied = "/artist-avatar?artist=" + urllib.parse.quote(a["name"])
+        avatar = f'<img class="avatar" src="{html.escape(proxied)}" alt="">'
+    else:
+        initial = html.escape(a["name"][:1].upper() or "?")
+        avatar = f'<div class="avatar avatar-ph">{initial}</div>'
+    eyebrow = '<p class="eyebrow">Most played</p>' if hero else ""
+    genre = f'<p class="p-genre">{html.escape(a["genre"])}</p>' if a["genre"] else ""
+    bio = f'<p class="p-bio">{html.escape(a["bio"])}</p>' if a["bio"] else ""
+    fact = (
+        f'<p class="p-fact">{a["listeners"]:,} listeners on Last.fm</p>'
+        if a["listeners"]
+        else ""
+    )
+    if a.get("album"):
+        # The hero shows more of its album art; ranked cards keep it more faded.
+        overlay = "rgba(23,17,48,.80)" if hero else "rgba(23,17,48,.88)"
+        style = (
+            f' style="background-image:linear-gradient({overlay},{overlay}),'
+            f"url('{html.escape(a['album'])}')\""
+        )
+    else:
+        style = ""
+    if a.get("channel_id"):
+        url = f"https://www.youtube.com/channel/{html.escape(a['channel_id'])}"
+        link = (
+            f'<a class="card-link" href="{url}" target="_blank" rel="noopener" '
+            f'aria-label="Open {name} on YouTube"></a>'
+        )
+        linkable = " linkable"
+    else:
+        link = ""
+        linkable = ""
+    tag = "div" if hero else "li"
+    variant = "hero" if hero else "rank-item"
+    return (
+        f'<{tag} class="profile {variant}{linkable}"{style}>{link}{avatar}'
+        f'<div class="p-body">{eyebrow}<p class="p-name">{name}</p>'
+        f"{genre}{bio}{fact}</div></{tag}>"
+    )
 
 
 def render_recommendations_page(recs) -> str:
