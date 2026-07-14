@@ -1,4 +1,5 @@
 # src/ytm_taste/main.py
+import base64
 import html
 import os
 import urllib.parse
@@ -31,7 +32,7 @@ BASE_STYLES = """
 :root{--bg:#0c0a14;--surface:#171130;--surface-2:#1e1740;--primary:#7c3aed;
   --primary-glow:#a855f7;--fg:#f5f3ff;--muted:#a29dc4;--border:rgba(255,255,255,.08)}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
+body{margin:0;background-color:var(--bg);color:var(--fg);
   font-family:'Poppins',system-ui,sans-serif;line-height:1.6}
 .container{width:70%;max-width:1400px;margin:0 auto;padding:2.5rem 1.25rem}
 h1{font-family:'Righteous',system-ui,cursive;font-weight:400;font-size:2rem;margin:0 0 .5rem;
@@ -88,6 +89,50 @@ a:hover{text-decoration:underline}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
 """
+
+# Painterly page background: faded purple brush strokes given a bristly, dragged-brush
+# edge via SVG turbulence displacement, plus a faint canvas grain, over the near-black
+# base. Inlined as a base64 data URI so pages stay self-contained (no external assets).
+_BACKGROUND_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1200' \
+viewBox='0 0 1600 1200'>
+<defs>
+<filter id='bristle' x='-20%' y='-20%' width='140%' height='140%'>
+<feTurbulence type='fractalNoise' baseFrequency='0.012 0.16' numOctaves='2' seed='7' result='n'/>
+<feDisplacementMap in='SourceGraphic' in2='n' scale='34' xChannelSelector='R' yChannelSelector='G'/>
+<feGaussianBlur stdDeviation='1.1'/>
+</filter>
+<filter id='grain'>
+<feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/>
+<feColorMatrix type='saturate' values='0'/>
+<feComponentTransfer><feFuncA type='linear' slope='0.035'/></feComponentTransfer>
+</filter>
+</defs>
+<rect width='100%' height='100%' fill='#0c0a14'/>
+<g filter='url(#bristle)' fill='none' stroke-linecap='round'>
+<path d='M-120,300 C 400,210 900,390 1760,250' stroke='#7c3aed' \
+stroke-width='95' opacity='0.11'/>
+<path d='M-120,540 C 520,660 1000,430 1760,610' stroke='#a855f7' \
+stroke-width='60' opacity='0.08'/>
+<path d='M-120,860 C 450,750 1120,1000 1760,820' stroke='#5b21b6' \
+stroke-width='130' opacity='0.10'/>
+<path d='M-120,1060 C 620,1160 1050,940 1760,1090' stroke='#7c3aed' \
+stroke-width='52' opacity='0.07'/>
+<path d='M240,-60 C 320,400 250,820 420,1300' stroke='#a855f7' \
+stroke-width='42' opacity='0.06'/>
+<path d='M1320,-60 C 1250,400 1420,820 1300,1300' stroke='#6d28d9' \
+stroke-width='72' opacity='0.07'/>
+</g>
+<rect width='100%' height='100%' filter='url(#grain)'/>
+</svg>"""
+
+_BG_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(
+    _BACKGROUND_SVG.encode("utf-8")
+).decode("ascii")
+
+BASE_STYLES += (
+    'body{background-image:url("' + _BG_DATA_URI + '");'
+    "background-size:cover;background-position:center;background-attachment:fixed}"
+)
 
 
 def _html_page(title: str, body: str) -> str:

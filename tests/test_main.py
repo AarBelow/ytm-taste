@@ -425,6 +425,11 @@ def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
     assert "https://www.youtube.com/channel/UC_alpha" in body
 
 
+def test_base_styles_includes_painterly_background():
+    assert "data:image/svg+xml;base64," in main.BASE_STYLES
+    assert "background-attachment:fixed" in main.BASE_STYLES
+
+
 def test_artist_avatar_proxy_serves_fetched_bytes(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     db_path = _complete_fake_login(client, monkeypatch, tmp_path)
