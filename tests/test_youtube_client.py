@@ -183,9 +183,9 @@ def test_fetch_video_details_batches_in_groups_of_50():
     youtube = FakeVideosResource(items)
     result = youtube_client.fetch_video_details(youtube, ids)
     assert len(result) == 120
-    # 120 ids -> 3 calls (50 + 50 + 20)
+    # 120 ids -> 3 calls (50 + 50 + 20), order not guaranteed under concurrency
     assert len(youtube.id_args) == 3
-    assert youtube.id_args[0].count(",") == 49  # 50 ids in first batch
+    assert any(a.count(",") == 49 for a in youtube.id_args)  # the 50-id batch exists
 
 
 def test_fetch_video_details_omits_ids_with_no_item():

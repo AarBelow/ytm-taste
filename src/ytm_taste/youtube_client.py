@@ -1,6 +1,8 @@
 # src/ytm_taste/youtube_client.py
 from googleapiclient.discovery import build
 
+from ytm_taste.concurrency import run_concurrently
+
 MUSIC_CATEGORY_ID = "10"
 
 
@@ -105,17 +107,23 @@ def fetch_subscriptions(youtube) -> list[dict]:
 
 
 def fetch_video_details(youtube, video_ids: list[str]) -> dict[str, dict]:
-    details: dict[str, dict] = {}
-    for start in range(0, len(video_ids), 50):
-        batch = video_ids[start : start + 50]
+    batches = [video_ids[i : i + 50] for i in range(0, len(video_ids), 50)]
+
+    def fetch_batch(batch):
         response = youtube.videos().list(part="snippet", id=",".join(batch)).execute()
+        result = {}
         for item in response.get("items", []):
             snippet = item["snippet"]
-            details[item["id"]] = {
+            result[item["id"]] = {
                 "channel_title": snippet.get("channelTitle"),
                 "category_id": snippet.get("categoryId"),
                 "channel_id": snippet.get("channelId"),
             }
+        return result
+
+    details: dict[str, dict] = {}
+    for batch_result in run_concurrently(fetch_batch, batches):
+        details.update(batch_result)
     return details
 
 
