@@ -367,3 +367,30 @@ def test_init_db_adds_album_art_url_to_legacy_artist_details():
     cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
     assert "album_art_url" in cols
     assert db.get_artist_details(conn, "potsu")["avatar_url"] == "http://a/p.jpg"
+
+
+def test_sync_ready_toggles_with_syncing_flag():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-15T00:00:00")
+    assert db.is_sync_ready(conn, uid) is True  # default 0 -> ready
+    db.set_user_syncing(conn, uid, True)
+    assert db.is_sync_ready(conn, uid) is False
+    db.set_user_syncing(conn, uid, False)
+    assert db.is_sync_ready(conn, uid) is True
+
+
+def test_init_db_adds_syncing_to_legacy_users():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT UNIQUE "
+        "NOT NULL, oauth_token TEXT NOT NULL, created_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO users (channel_id, oauth_token, created_at) VALUES ('UC1','{}','t')"
+    )
+    conn.commit()
+    db.init_db(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    assert "syncing" in cols
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    assert db.is_sync_ready(conn, uid) is True

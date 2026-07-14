@@ -14,7 +14,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             channel_id TEXT UNIQUE NOT NULL,
             oauth_token TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            syncing INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS sync_runs (
@@ -81,6 +82,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
     if "album_art_url" not in cols:
         conn.execute("ALTER TABLE artist_details ADD COLUMN album_art_url TEXT")
+    ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if "syncing" not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN syncing INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -317,3 +321,12 @@ def get_artist_details(conn, artist_name) -> dict | None:
         "listeners": row[3],
         "album_art_url": row[4],
     }
+
+
+def set_user_syncing(conn, user_id, syncing) -> None:
+    conn.execute("UPDATE users SET syncing = ? WHERE id = ?", (1 if syncing else 0, user_id))
+
+
+def is_sync_ready(conn, user_id) -> bool:
+    row = conn.execute("SELECT syncing FROM users WHERE id = ?", (user_id,)).fetchone()
+    return bool(row) and row[0] == 0
