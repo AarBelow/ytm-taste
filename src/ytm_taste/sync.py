@@ -25,6 +25,7 @@ def run_sync(
     fetch_song_meta_fn=itunes_client.fetch_song_meta,
     fetch_channel_avatars_fn=youtube_client.fetch_channel_avatars,
     fetch_artist_info_fn=lastfm_client.fetch_artist_info,
+    fetch_artist_album_art_fn=itunes_client.fetch_artist_album_art,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -104,12 +105,16 @@ def run_sync(
             )
         else:
             infos = [None] * len(top_artists)
-        for (name, _count), info in zip(top_artists, infos):
+        album_arts = concurrency.run_concurrently(
+            lambda a: fetch_artist_album_art_fn(a[0]), top_artists
+        )
+        for (name, _count), info, album_art in zip(top_artists, infos, album_arts):
             channel_id = channels.get(name)
             avatar = avatars.get(channel_id) if channel_id else None
             info = info or {}
             db.upsert_artist_details(
-                conn, name, avatar, info.get("genre"), info.get("bio"), info.get("listeners")
+                conn, name, avatar, info.get("genre"), info.get("bio"),
+                info.get("listeners"), album_art,
             )
         conn.commit()
     except Exception as exc:  # best-effort; never fails the sync

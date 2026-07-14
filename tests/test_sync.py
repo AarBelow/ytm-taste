@@ -404,6 +404,7 @@ def test_run_sync_populates_artist_details(tmp_path):
         fetch_song_meta_fn=lambda a, t: None,
         fetch_channel_avatars_fn=avatars,
         fetch_artist_info_fn=artist_info,
+        fetch_artist_album_art_fn=lambda a: "http://a/alb.jpg",
     )
     conn = db.get_connection(db_path)
     details = db.get_artist_details(conn, "Alpha")
@@ -412,4 +413,5 @@ def test_run_sync_populates_artist_details(tmp_path):
         "genre": "indie",
         "bio": "An artist.",
         "listeners": 100,
+        "album_art_url": "http://a/alb.jpg",
     }
