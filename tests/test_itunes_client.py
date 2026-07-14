@@ -58,3 +58,26 @@ def test_fetch_song_meta_keeps_artwork_when_no_size_token():
     }
     result = itunes_client.fetch_song_meta("a", "b", get_fn=make_get(data))
     assert result["image_url"] == "https://img/cover.jpg"
+
+
+def test_fetch_artist_album_art_returns_upscaled_url():
+    def fake_get(url, params=None, timeout=None):
+        assert params["entity"] == "album"
+        return FakeResponse({"results": [{"artworkUrl100": "http://a/100x100bb.jpg"}]})
+
+    url = itunes_client.fetch_artist_album_art("potsu", get_fn=fake_get)
+    assert url == "http://a/600x600bb.jpg"
+
+
+def test_fetch_artist_album_art_returns_none_when_no_results():
+    def fake_get(url, params=None, timeout=None):
+        return FakeResponse({"results": []})
+
+    assert itunes_client.fetch_artist_album_art("nobody", get_fn=fake_get) is None
+
+
+def test_fetch_artist_album_art_returns_none_when_no_artwork():
+    def fake_get(url, params=None, timeout=None):
+        return FakeResponse({"results": [{"collectionName": "Album"}]})
+
+    assert itunes_client.fetch_artist_album_art("x", get_fn=fake_get) is None
