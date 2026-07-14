@@ -179,26 +179,88 @@ def _complete_fake_login(client, monkeypatch, tmp_path, channel_id="UC123"):
     monkeypatch.setattr(google_oauth, "fetch_credentials", lambda flow, url: FakeCredentials())
     monkeypatch.setattr(youtube_client, "build_youtube_client", lambda credentials: object())
     monkeypatch.setattr(youtube_client, "get_channel_id", lambda youtube: channel_id)
-    monkeypatch.setattr(
-        main.sync,
-        "run_sync",
-        lambda *a, **kw: {
+
+    def fake_run_sync(db_path_arg, user_id, youtube, **kwargs):
+        # Mirrors real sync.run_sync's finally-block behavior: mark the user
+        # ready again once the (fake) sync completes, so tests that log in
+        # via this helper land in the "ready" state by default.
+        from ytm_taste import db as db_module
+
+        conn = db_module.get_connection(db_path_arg)
+        db_module.set_user_syncing(conn, user_id, False)
+        conn.commit()
+        conn.close()
+        return {
             "liked_videos": 0,
             "playlists": 0,
             "subscriptions": 0,
             "elapsed_seconds": 0.0,
-        },
-    )
+        }
+
+    monkeypatch.setattr(main.sync, "run_sync", fake_run_sync)
     client.get("/login")
     client.get("/auth/callback", params={"state": "st", "code": "abc"})
     return db_path
 
 
-def test_root_redirects_to_login_when_not_logged_in():
+def test_root_logged_out_shows_landing():
     client = TestClient(main.app, follow_redirects=False)
-    response = client.get("/")
-    assert response.status_code in (302, 307)
-    assert response.headers["location"] == "/login"
+    body = client.get("/").text
+    assert "Connect YouTube" in body
+    assert "ytm-taste" in body
+
+
+def test_artists_redirects_to_login_with_next_when_logged_out():
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/artists")
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/login?next=/artists"
+
+
+def test_root_logged_in_syncing_shows_loader(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.set_user_syncing(conn, uid, True)
+    conn.commit()
+    conn.close()
+
+    body = client.get("/").text
+    assert "Tuning in" in body
+    assert "/status" in body
+
+
+def test_root_logged_in_ready_redirects_to_artists(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    # default syncing = 0 -> ready
+    r = client.get("/")
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/artists"
+
+
+def test_status_reports_ready_boolean(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    assert client.get("/status").json() == {"ready": True}
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.set_user_syncing(conn, uid, True)
+    conn.commit()
+    conn.close()
+    assert client.get("/status").json() == {"ready": False}
+
+
+def test_safe_next_allowlist():
+    assert main._safe_next("/recommendations") == "/recommendations"
+    assert main._safe_next("/artists") == "/artists"
+    assert main._safe_next("https://evil.example") == "/artists"
+    assert main._safe_next(None) == "/artists"
 
 
 def _artist(name, avatar=None, genre=None, bio=None, listeners=None):
@@ -238,7 +300,7 @@ def test_root_shows_top_artists_when_logged_in(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    response = client.get("/")
+    response = client.get("/artists")
     assert response.status_code == 200
     body = response.text
     assert "Radiohead" in body
@@ -278,7 +340,7 @@ def test_root_page_reflects_combined_liked_and_playlist_tally(monkeypatch, tmp_p
     conn.commit()
     conn.close()
 
-    response = client.get("/")
+    response = client.get("/artists")
     assert response.status_code == 200
     body = response.text
     assert "Both" in body and "PlaylistOnly" in body
@@ -288,7 +350,7 @@ def test_root_page_reflects_combined_liked_and_playlist_tally(monkeypatch, tmp_p
 def test_root_shows_empty_state_when_logged_in_with_no_liked_videos(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _complete_fake_login(client, monkeypatch, tmp_path)
-    response = client.get("/")
+    response = client.get("/artists")
     assert response.status_code == 200
     assert "synced yet" in response.text.lower()
 
@@ -296,7 +358,7 @@ def test_root_shows_empty_state_when_logged_in_with_no_liked_videos(monkeypatch,
 def test_home_page_links_to_recommendations(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _complete_fake_login(client, monkeypatch, tmp_path)
-    response = client.get("/")
+    response = client.get("/artists")
     assert "/recommendations" in response.text
 
 
@@ -304,7 +366,7 @@ def test_recommendations_redirects_to_login_when_not_logged_in():
     client = TestClient(main.app, follow_redirects=False)
     response = client.get("/recommendations")
     assert response.status_code in (302, 307)
-    assert response.headers["location"] == "/login"
+    assert response.headers["location"] == "/login?next=/recommendations"
 
 
 def test_recommendations_page_shows_cards_with_cover_and_audio(monkeypatch, tmp_path):
@@ -366,7 +428,7 @@ def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert "Artist6" in body and "Artist2" in body
     assert "Artist1" not in body
 
@@ -374,7 +436,7 @@ def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):
 def test_home_uses_dark_theme(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _complete_fake_login(client, monkeypatch, tmp_path)
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert "#7c3aed" in body.lower() or "--primary" in body
 
 
@@ -394,7 +456,7 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert "Alpha" in body
     assert "indie" in body
     assert "An artist bio." in body
@@ -421,7 +483,7 @@ def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert "https://www.youtube.com/channel/UC_alpha" in body
 
 
@@ -445,7 +507,7 @@ def test_home_renders_hero_and_ranked_list(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert 'class="profile hero"' in body
     assert 'class="ranked"' in body
     assert body.count("Most played") == 1  # only the hero carries the eyebrow
@@ -543,6 +605,6 @@ def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
     conn.commit()
     conn.close()
 
-    body = client.get("/").text
+    body = client.get("/artists").text
     assert "Alpha" in body
     assert "youtube.com/channel/" not in body

@@ -169,6 +169,72 @@ def _html_page(title: str, body: str) -> str:
     )
 
 
+_ALLOWED_NEXT = {"/artists", "/recommendations"}
+
+
+def _safe_next(value) -> str:
+    return value if value in _ALLOWED_NEXT else "/artists"
+
+
+def render_landing_page() -> str:
+    tiles = (
+        '<a class="tile" href="/artists"><span class="tile-ic">&#127911;</span>'
+        '<span class="tile-h">Top Artists</span>'
+        '<span class="tile-p">Your most-played, ranked.</span></a>'
+        '<a class="tile" href="/recommendations"><span class="tile-ic">&#10024;</span>'
+        '<span class="tile-h">Song Recs</span>'
+        '<span class="tile-p">Picked from your taste.</span></a>'
+        '<a class="tile" href="/recommendations"><span class="tile-ic">&#9654;</span>'
+        '<span class="tile-h">Previews</span>'
+        '<span class="tile-p">Hover any cover to hear it.</span></a>'
+    )
+    eq = (
+        '<div class="eq" aria-hidden="true">'
+        + "".join("<span></span>" for _ in range(7))
+        + "</div>"
+    )
+    body = (
+        '<div class="landing">'
+        '<p class="eyebrow2">YouTube Music &middot; Taste Analyzer</p>'
+        '<h1 class="wordmark">ytm-taste</h1>'
+        '<p class="lead">Your listening, decoded.</p>'
+        '<p class="lead-sub">Connect your YouTube account for your top artists, '
+        "song recs, and instant previews.</p>"
+        f"{eq}"
+        '<a class="cta" href="/login">Connect YouTube</a>'
+        f'<div class="tiles">{tiles}</div>'
+        "</div>"
+    )
+    return _html_page("ytm-taste", body)
+
+
+def render_loading_page(next_target: str) -> str:
+    eq = (
+        '<div class="eq" aria-hidden="true">'
+        + "".join("<span></span>" for _ in range(7))
+        + "</div>"
+    )
+    target = html.escape(next_target)
+    script = (
+        "<script>(function(){var t=" + repr(next_target) + ";var n=0;function c(){n++;"
+        "fetch('/status').then(function(r){return r.json();}).then(function(d){"
+        "if(d&&d.ready){window.location.replace(t);}else if(n<40){setTimeout(c,1500);}"
+        "else{window.location.replace(t);}}).catch(function(){if(n<40){setTimeout(c,1500);}});}"
+        "c();})();</script>"
+    )
+    body = (
+        f'<div class="landing" data-next="{target}">'
+        '<p class="eyebrow2">YouTube Music &middot; Taste Analyzer</p>'
+        '<h1 class="wordmark">ytm-taste</h1>'
+        '<p class="lead">Tuning in to your library&hellip;</p>'
+        '<p class="lead-sub">Reading your likes and playlists. This takes a few seconds.</p>'
+        f"{eq}"
+        f"{script}"
+        "</div>"
+    )
+    return _html_page("Tuning in…", body)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "ytm-taste"}
@@ -284,7 +350,7 @@ def render_recommendations_page(recs) -> str:
             "<h1>Songs You Might Like</h1>"
             '<p class="empty">No recommendations yet — after you log in, the sync '
             "generates them in the background; give it a moment and refresh.</p>"
-            '<p><a href="/">&larr; back to your top artists</a></p>'
+            '<p><a href="/artists">&larr; back to your top artists</a></p>'
         )
         return _html_page("Songs You Might Like", body)
 
@@ -330,7 +396,7 @@ if(moreBtn){ moreBtn.addEventListener('click', function(){
         '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
         f'<ul class="recs">{"".join(cards)}</ul>'
         f"{more}"
-        '<p><a href="/">&larr; back to your top artists</a></p>'
+        '<p><a href="/artists">&larr; back to your top artists</a></p>'
         f"{script}"
     )
     return _html_page("Songs You Might Like", body)
@@ -340,9 +406,28 @@ if(moreBtn){ moreBtn.addEventListener('click', function(){
 def read_root(request: Request):
     user_id = request.session.get("user_id")
     if user_id is None:
-        return RedirectResponse("/login")
+        return HTMLResponse(render_landing_page())
+    pending = _safe_next(request.query_params.get("next") or request.session.get("post_sync_next"))
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    ready = db.is_sync_ready(conn, user_id)
+    conn.close()
+    if ready:
+        request.session.pop("post_sync_next", None)
+        return RedirectResponse(pending)
+    return HTMLResponse(render_loading_page(pending))
+
+
+@app.get("/artists")
+def artists_page(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return RedirectResponse("/login?next=/artists")
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    if not db.is_sync_ready(conn, user_id):
+        conn.close()
+        return RedirectResponse("/?next=/artists")
     top = db.get_top_artists(conn, user_id)[:5]
     channels = db.get_top_artist_channels(conn, user_id)
     artists = []
@@ -363,13 +448,28 @@ def read_root(request: Request):
     return HTMLResponse(render_results_page(artists))
 
 
+@app.get("/status")
+def status(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return {"ready": False}
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    ready = db.is_sync_ready(conn, user_id)
+    conn.close()
+    return {"ready": ready}
+
+
 @app.get("/recommendations")
 def recommendations_page(request: Request):
     user_id = request.session.get("user_id")
     if user_id is None:
-        return RedirectResponse("/login")
+        return RedirectResponse("/login?next=/recommendations")
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    if not db.is_sync_ready(conn, user_id):
+        conn.close()
+        return RedirectResponse("/?next=/recommendations")
     recs = db.get_recommendations(conn, user_id)
     conn.close()
     return HTMLResponse(render_recommendations_page(recs))
@@ -386,6 +486,7 @@ def _build_flow(code_verifier: str | None = None):
 
 @app.get("/login")
 def login(request: Request):
+    request.session["post_sync_next"] = _safe_next(request.query_params.get("next"))
     flow = _build_flow()
     authorization_url, state, code_verifier = google_oauth.get_authorization_url(flow)
     request.session["oauth_state"] = state
@@ -420,6 +521,11 @@ def auth_callback(request: Request, background_tasks: BackgroundTasks):
     conn.close()
 
     request.session["user_id"] = user_id
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
     background_tasks.add_task(
         sync.run_sync, DB_PATH, user_id, youtube,
         lastfm_api_key=os.environ.get("LASTFM_API_KEY"),
