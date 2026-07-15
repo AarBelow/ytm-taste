@@ -178,3 +178,66 @@ def run_sync(
         db.set_user_syncing(conn, user_id, False)
         conn.commit()
         conn.close()
+
+
+def rerank(
+    db_path: str,
+    user_id: int,
+    lastfm_api_key=None,
+    fetch_similar_fn=lastfm_client.fetch_similar_tracks,
+    fetch_song_meta_fn=itunes_client.fetch_song_meta,
+) -> dict:
+    """Rebuild recommendations from the user's fine-tune preferences.
+
+    Deliberately never touches YouTube: preferences change how we select and weigh,
+    not what is in the library, so re-reading it would be slow and pointless. Seeds ->
+    Last.fm similar -> rank -> covers. Seconds, not the full sync's ~25s.
+    """
+    start = time.monotonic()
+    conn = db.get_connection(db_path)
+    db.init_db(conn)
+    try:
+        count = 0
+        if lastfm_api_key:
+            try:
+                prefs = db.get_user_prefs(conn, user_id)
+                pool = db.get_clean_seed_songs(conn, user_id, prefs.get("playlists") or None)
+                top = db.get_top_artists(conn, user_id)
+                seeds = recommendations.select_seeds(pool, top)
+                similar_by_seed = concurrency.run_concurrently(
+                    lambda s: fetch_similar_fn(lastfm_api_key, s[0], s[1]), seeds,
+                    max_workers=10,
+                )
+                recs = recommendations.rank(
+                    similar_by_seed,
+                    db.get_owned_song_keys(conn, user_id),
+                    known_artists={name.casefold() for name, _c in top},
+                    discovery=prefs.get("discovery"),
+                    mode=prefs.get("mode"),
+                )
+                metas = concurrency.run_concurrently(
+                    lambda r: fetch_song_meta_fn(r[0], r[1]), recs
+                )
+                enriched = [
+                    (
+                        artist,
+                        track,
+                        score,
+                        meta["image_url"] if meta else None,
+                        meta["preview_url"] if meta else None,
+                    )
+                    for (artist, track, score), meta in zip(recs, metas)
+                ]
+                db.replace_recommendations(conn, user_id, enriched)
+                conn.commit()
+                count = len(enriched)
+            except Exception as exc:  # best-effort: keep whatever recommendations exist
+                conn.rollback()
+                print(f"Re-rank failed (skipped): {exc}")
+        elapsed = time.monotonic() - start
+        print(f"Re-ranked {count} recommendations in {elapsed:.1f}s")
+        return {"recommendations": count, "elapsed_seconds": elapsed}
+    finally:
+        db.set_user_syncing(conn, user_id, False)
+        conn.commit()
+        conn.close()

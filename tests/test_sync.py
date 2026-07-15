@@ -417,6 +417,87 @@ def test_run_sync_populates_artist_details(tmp_path):
     }
 
 
+def _seeded_user(db_path):
+    """A user with a couple of nameable songs, as if a sync had already run."""
+    user_id = make_user(db_path, "UC_rr")
+    conn = db.get_connection(db_path)
+    db.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Alpha - Topic"}]
+    )
+    db.replace_playlists(
+        conn,
+        user_id,
+        [
+            {
+                "playlist_id": "pl1",
+                "title": "Moody",
+                "items": [
+                    {
+                        "video_id": f"p{i}",
+                        "title": f"pl song {i}",
+                        "channel_title": "Beta - Topic",
+                        "category_id": "10",
+                    }
+                    for i in range(10)
+                ],
+            }
+        ],
+    )
+    conn.commit()
+    conn.close()
+    return user_id
+
+
+def test_rerank_rebuilds_recommendations_without_touching_youtube(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = _seeded_user(db_path)
+    sync.rerank(
+        db_path, user_id, lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [{"artist": "New", "track": "Song", "match": 0.9}],
+        fetch_song_meta_fn=lambda a, t: {"image_url": "i", "preview_url": "p"},
+    )
+    conn = db.get_connection(db_path)
+    recs = db.get_recommendations(conn, user_id)
+    assert [(a, t) for a, t, _s, _i, _p in recs] == [("New", "Song")]
+    assert db.is_sync_ready(conn, user_id) is True  # flag cleared
+    conn.close()
+
+
+def test_rerank_seeds_only_from_the_chosen_playlist(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = _seeded_user(db_path)
+    conn = db.get_connection(db_path)
+    db.set_user_prefs(conn, user_id, {"playlists": ["pl1"], "discovery": "mix", "mode": "safe"})
+    conn.commit()
+    conn.close()
+
+    asked = []
+    sync.rerank(
+        db_path, user_id, lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: asked.append(a) or [],
+        fetch_song_meta_fn=lambda a, t: None,
+    )
+    assert set(asked) == {"Beta"}  # only the playlist's artist, not the liked "Alpha"
+
+
+def test_rerank_clears_syncing_even_when_it_fails(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = _seeded_user(db_path)
+    conn = db.get_connection(db_path)
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
+
+    def boom(k, a, t):
+        raise RuntimeError("lastfm down")
+
+    sync.rerank(db_path, user_id, lastfm_api_key="KEY", fetch_similar_fn=boom,
+                fetch_song_meta_fn=lambda a, t: None)
+    conn = db.get_connection(db_path)
+    assert db.is_sync_ready(conn, user_id) is True  # never leaves the user stuck on the loader
+    conn.close()
+
+
 def test_run_sync_fetches_similar_tracks_with_ten_workers(tmp_path, monkeypatch):
     from ytm_taste import concurrency
 
