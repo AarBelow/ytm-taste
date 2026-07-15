@@ -790,6 +790,108 @@ def test_refresh_falls_back_to_login_when_the_stored_token_is_dead(monkeypatch, 
     assert r.headers["location"] == "/login?next=/artists"
 
 
+def _with_playlist(db_path, title="Moody", pid="pl1", n=10):
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_playlists(
+        conn,
+        uid,
+        [
+            {
+                "playlist_id": pid,
+                "title": title,
+                "items": [
+                    {
+                        "video_id": f"{pid}v{i}",
+                        "title": f"song {i}",
+                        "channel_title": "Beta - Topic",
+                        "category_id": "10",
+                    }
+                    for i in range(n)
+                ],
+            }
+        ],
+    )
+    conn.commit()
+    conn.close()
+    return uid
+
+
+def test_recommendations_page_has_the_fine_tune_wizard(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    uid = _with_playlist(db_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    db_module.replace_recommendations(conn, uid, [("A", "T", 1.0, None, None)])
+    conn.commit()
+    conn.close()
+    body = client.get("/recommendations").text
+    assert "Fine-tune" in body
+    assert 'id="ft-overlay"' in body
+    # all three steps, and the user's seedable playlist offered by name
+    assert "Which playlists do you prefer?" in body
+    assert "Recommend" in body
+    assert "Picks should be" in body
+    assert "Moody" in body
+
+
+def test_fine_tune_requires_login():
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.post("/fine-tune", json={"playlists": [], "discovery": "mix", "mode": "safe"})
+    assert r.status_code == 401
+
+
+def test_fine_tune_stores_prefs_and_queues_a_rerank(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    _with_playlist(db_path)
+    calls = []
+    monkeypatch.setattr(main.sync, "rerank", lambda db_p, uid, **kw: calls.append(uid))
+
+    r = client.post(
+        "/fine-tune", json={"playlists": ["pl1"], "discovery": "new", "mode": "adventurous"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert len(calls) == 1  # the re-rank ran
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    assert db_module.get_user_prefs(conn, uid) == {
+        "playlists": ["pl1"],
+        "discovery": "new",
+        "mode": "adventurous",
+    }
+    conn.close()
+
+
+def test_fine_tune_clamps_junk_input(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    _with_playlist(db_path)
+    monkeypatch.setattr(main.sync, "rerank", lambda db_p, uid, **kw: None)
+
+    client.post(
+        "/fine-tune",
+        json={"playlists": ["pl1", "not-mine"], "discovery": "hack", "mode": "../../etc"},
+    )
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    prefs = db_module.get_user_prefs(conn, uid)
+    assert prefs["playlists"] == ["pl1"]  # unknown playlist dropped
+    assert prefs["discovery"] == "mix"  # unknown value falls back to the default
+    assert prefs["mode"] == "safe"
+    conn.close()
+
+
 def test_loading_page_only_navigates_when_ready():
     page = main.render_loading_page("/artists")
     # The ONLY navigation is the ready path. A fail-safe redirect here would

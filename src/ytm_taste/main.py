@@ -12,7 +12,7 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
-from ytm_taste import db, google_oauth, sync, youtube_client
+from ytm_taste import db, google_oauth, recommendations, sync, youtube_client
 
 load_dotenv()
 
@@ -131,6 +131,35 @@ a:hover{text-decoration:underline}
   letter-spacing:.04em;margin:0 0 .4rem}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
+.ft-fab{position:fixed;right:1.5rem;bottom:1.5rem;z-index:20;min-height:44px;
+  padding:.75rem 1.4rem;font-family:'Poppins',sans-serif;font-weight:600;color:#fff;
+  background:var(--primary);border:none;border-radius:999px;cursor:pointer;
+  box-shadow:0 8px 30px rgba(124,58,237,.5);transition:background .2s,transform .2s}
+.ft-fab:hover{background:var(--primary-glow);transform:translateY(-2px)}
+.ft-fab:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+.ft-overlay{position:fixed;inset:0;z-index:30;display:flex;align-items:center;
+  justify-content:center;padding:1.25rem;background:rgba(6,4,12,.72)}
+.ft-panel{position:relative;width:min(30rem,100%);padding:2rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.ft-close{position:absolute;top:.6rem;right:.9rem;background:none;border:none;
+  color:var(--muted);font-size:1.5rem;line-height:1;cursor:pointer}
+.ft-close:hover{color:var(--fg)}
+.ft-panel h2{font-family:'Righteous',cursive;font-weight:400;font-size:1.4rem;
+  margin:0 0 .35rem;color:var(--fg)}
+.ft-hint{margin:0 0 1rem;font-size:.85rem;color:var(--muted)}
+.ft-step{opacity:1;transform:translateY(0);transition:opacity .22s ease,transform .22s ease}
+.ft-step.ft-out{opacity:0;transform:translateY(-8px)}
+.ft-step.ft-in{opacity:0;transform:translateY(8px)}
+.ft-opts{display:flex;flex-direction:column;gap:.5rem;margin:1rem 0 1.4rem;
+  max-height:46vh;overflow-y:auto}
+.ft-opt{display:flex;align-items:center;gap:.7rem;min-height:44px;padding:.6rem .9rem;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:12px;
+  cursor:pointer;transition:border-color .2s}
+.ft-opt:hover{border-color:var(--primary-glow)}
+.ft-opt input{accent-color:var(--primary-glow);width:1.05rem;height:1.05rem;flex:0 0 auto}
+.ft-opt em{color:var(--muted);font-style:normal;font-size:.8rem}
+.ft-panel .more-btn{margin:0;width:100%}
+@media (prefers-reduced-motion:reduce){.ft-step{transition:none}}
 .pagenav{display:flex;margin:2.25rem 0 0}
 .pagenav-link{display:flex;flex-direction:column;justify-content:center;gap:.1rem;
   min-height:44px;min-width:min(300px,100%);padding:.85rem 1.25rem;background:var(--surface);
@@ -278,6 +307,62 @@ def _topbar(refresh: bool = False, next_path: str = "/artists") -> str:
     return (
         '<header class="topbar"><a class="home-link" href="/">ytm-taste</a>'
         f"{action}</header>"
+    )
+
+
+def _fine_tune_wizard(playlists, prefs) -> str:
+    """Three fading steps: which playlists -> discovery -> safe/adventurous."""
+    def checked(name, value):
+        return " checked" if prefs.get(name) == value else ""
+
+    boxes = "".join(
+        f'<label class="ft-opt"><input type="checkbox" name="playlists" '
+        f'value="{html.escape(p["playlist_id"])}"'
+        f'{" checked" if p["playlist_id"] in (prefs.get("playlists") or []) else ""}>'
+        f'<span>{html.escape(p["title"])}<em> {p["count"]} songs</em></span></label>'
+        for p in playlists
+    )
+    if not boxes:
+        boxes = '<p class="ft-hint">No playlists big enough to build from yet.</p>'
+    discovery = "".join(
+        f'<label class="ft-opt"><input type="radio" name="discovery" value="{v}"'
+        f'{checked("discovery", v)}><span>{label}</span></label>'
+        for v, label in (
+            ("love", "More from artists I love"),
+            ("mix", "A mix"),
+            ("new", "Artists I&rsquo;ve never heard"),
+        )
+    )
+    mode = "".join(
+        f'<label class="ft-opt"><input type="radio" name="mode" value="{v}"'
+        f'{checked("mode", v)}><span>{label}</span></label>'
+        for v, label in (
+            ("safe", "Safe &mdash; fits my taste broadly"),
+            ("adventurous", "Adventurous &mdash; bold matches"),
+        )
+    )
+    return (
+        '<button id="ft-open" class="ft-fab" type="button">Fine-tune</button>'
+        '<div id="ft-overlay" class="ft-overlay" hidden>'
+        '<div class="ft-panel">'
+        '<button id="ft-close" class="ft-close" type="button" aria-label="Close">&times;</button>'
+        '<div class="ft-step" data-step="1">'
+        "<h2>Which playlists do you prefer?</h2>"
+        '<p class="ft-hint">Pick any you like, or none to use all your music.</p>'
+        f'<div class="ft-opts">{boxes}</div>'
+        '<button class="ft-next more-btn" type="button">Next</button>'
+        "</div>"
+        '<div class="ft-step" data-step="2" hidden>'
+        "<h2>Recommend&hellip;</h2>"
+        f'<div class="ft-opts">{discovery}</div>'
+        '<button class="ft-next more-btn" type="button">Next</button>'
+        "</div>"
+        '<div class="ft-step" data-step="3" hidden>'
+        "<h2>Picks should be&hellip;</h2>"
+        f'<div class="ft-opts">{mode}</div>'
+        '<button id="ft-submit" class="more-btn" type="button">Tune my recommendations</button>'
+        "</div>"
+        "</div></div>"
     )
 
 
@@ -478,7 +563,9 @@ def _artist_card(a, hero: bool) -> str:
     )
 
 
-def render_recommendations_page(recs) -> str:
+def render_recommendations_page(recs, playlists=None, prefs=None) -> str:
+    playlists = playlists or []
+    prefs = prefs or dict(db.DEFAULT_PREFS)
     if not recs:
         body = (
             f"{_topbar(refresh=True, next_path='/recommendations')}<h1>Songs You Might Like</h1>"
@@ -544,13 +631,63 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
 }); }
 </script>
 """
+    ft_script = """
+<script>
+(function(){
+  var overlay=document.getElementById('ft-overlay');
+  if(!overlay) return;
+  var steps=Array.prototype.slice.call(overlay.querySelectorAll('.ft-step'));
+  var at=0;
+  function show(i){
+    var cur=steps[at], nxt=steps[i];
+    cur.classList.add('ft-out');
+    setTimeout(function(){
+      cur.hidden=true; cur.classList.remove('ft-out');
+      nxt.hidden=false; nxt.classList.add('ft-in');
+      setTimeout(function(){ nxt.classList.remove('ft-in'); }, 20);
+      at=i;
+    }, 220);
+  }
+  function reset(){ steps.forEach(function(s,i){ s.hidden = i!==0; }); at=0; }
+  document.getElementById('ft-open').addEventListener('click', function(){
+    reset(); overlay.hidden=false;
+  });
+  document.getElementById('ft-close').addEventListener('click', function(){
+    overlay.hidden=true;
+  });
+  overlay.querySelectorAll('.ft-next').forEach(function(b){
+    b.addEventListener('click', function(){ if(at<steps.length-1) show(at+1); });
+  });
+  document.getElementById('ft-submit').addEventListener('click', function(){
+    var picked=[];
+    overlay.querySelectorAll('input[name=playlists]:checked').forEach(function(c){
+      picked.push(c.value);
+    });
+    function radio(n){
+      var el=overlay.querySelector('input[name='+n+']:checked');
+      return el ? el.value : null;
+    }
+    this.disabled=true; this.textContent='Tuning\\u2026';
+    fetch('/fine-tune',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({playlists:picked, discovery:radio('discovery'), mode:radio('mode')})
+    }).then(function(){
+      window.location.href='/?next=/recommendations';
+    }).catch(function(){
+      window.location.href='/?next=/recommendations';
+    });
+  });
+})();
+</script>
+"""
     body = (
         f"{_topbar(refresh=True, next_path='/recommendations')}<h1>Songs You Might Like</h1>"
         '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
         f'<ul class="recs">{"".join(cards)}</ul>'
         f"{more}"
         f"{_pagenav('prev', '/artists', 'Your Top Artists')}"
-        f"{script}"
+        f"{_fine_tune_wizard(playlists, prefs)}"
+        f"{script}{ft_script}"
     )
     return _html_page("Songs You Might Like", body)
 
@@ -637,6 +774,41 @@ def refresh(request: Request, background_tasks: BackgroundTasks):
     return RedirectResponse(f"/?next={back_to}", status_code=303)
 
 
+@app.post("/fine-tune")
+async def fine_tune(request: Request, background_tasks: BackgroundTasks):
+    """Store the wizard's answers and rebuild recommendations from them.
+
+    JSON rather than a form post: FastAPI's Form() needs python-multipart, and the
+    wizard already requires JavaScript for its step transitions.
+    """
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return Response(status_code=401)
+    payload = await request.json()
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    # Clamp everything: only the user's own playlists, only known option values.
+    own = {p["playlist_id"] for p in db.get_seedable_playlists(conn, user_id)}
+    asked = payload.get("playlists") or []
+    prefs = {
+        "playlists": [p for p in asked if p in own],
+        "discovery": payload.get("discovery")
+        if payload.get("discovery") in recommendations.KNOWN_ARTIST_WEIGHTS
+        else db.DEFAULT_PREFS["discovery"],
+        "mode": payload.get("mode")
+        if payload.get("mode") in ("safe", "adventurous")
+        else db.DEFAULT_PREFS["mode"],
+    }
+    db.set_user_prefs(conn, user_id, prefs)
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
+    background_tasks.add_task(
+        sync.rerank, DB_PATH, user_id, lastfm_api_key=os.environ.get("LASTFM_API_KEY")
+    )
+    return {"ok": True}
+
+
 @app.get("/status")
 def status(request: Request):
     user_id = request.session.get("user_id")
@@ -660,8 +832,10 @@ def recommendations_page(request: Request):
         conn.close()
         return RedirectResponse("/?next=/recommendations")
     recs = db.get_recommendations(conn, user_id)
+    playlists = db.get_seedable_playlists(conn, user_id)
+    prefs = db.get_user_prefs(conn, user_id)
     conn.close()
-    return HTMLResponse(render_recommendations_page(recs))
+    return HTMLResponse(render_recommendations_page(recs, playlists, prefs))
 
 
 def _build_flow(code_verifier: str | None = None):
