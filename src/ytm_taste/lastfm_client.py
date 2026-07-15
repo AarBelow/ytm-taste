@@ -93,3 +93,29 @@ def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
     except (ValueError, TypeError):
         listeners = None
     return {"genre": genre, "bio": bio, "listeners": listeners}
+
+
+def verify_track(api_key, artist, track, get_fn=requests.get) -> dict | None:
+    response = get_fn(
+        API_URL,
+        params={
+            "method": "track.getInfo",
+            "artist": artist,
+            "track": track,
+            "api_key": api_key,
+            "autocorrect": 1,
+            "format": "json",
+        },
+        timeout=10,
+    )
+    data = response.json()
+    if not isinstance(data, dict):
+        return None
+    found = data.get("track")
+    if not isinstance(found, dict):
+        return None
+    name = found.get("name")
+    artist_name = (found.get("artist") or {}).get("name")
+    if not name or not artist_name:
+        return None
+    return {"artist": artist_name, "track": name}

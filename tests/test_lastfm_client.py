@@ -137,3 +137,27 @@ def test_fetch_artist_info_none_when_missing():
         )
         is None
     )
+
+
+def test_verify_track_returns_canonical_names():
+    data = {"track": {"name": "romance", "artist": {"name": "android 52"}}}
+    got = lastfm_client.verify_track("K", "android52", "romance", get_fn=make_get(data, []))
+    assert got == {"artist": "android 52", "track": "romance"}
+
+
+def test_verify_track_uses_autocorrect_and_track_getinfo():
+    captured = {}
+
+    def fake_get(url, params=None, timeout=None):
+        captured.update(params)
+        return FakeResponse({"track": {"name": "T", "artist": {"name": "A"}}})
+
+    lastfm_client.verify_track("K", "A", "T", get_fn=fake_get)
+    assert captured["method"] == "track.getInfo"
+    assert captured["autocorrect"] == 1
+
+
+def test_verify_track_returns_none_when_not_found():
+    err = {"error": 6, "message": "Track not found"}
+    assert lastfm_client.verify_track("K", "x", "y", get_fn=make_get(err, [])) is None
+    assert lastfm_client.verify_track("K", "x", "y", get_fn=make_get({}, [])) is None
