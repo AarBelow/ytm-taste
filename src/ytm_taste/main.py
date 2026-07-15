@@ -131,12 +131,21 @@ a:hover{text-decoration:underline}
   letter-spacing:.04em;margin:0 0 .4rem}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
-.ft-fab{position:fixed;right:1.5rem;bottom:1.5rem;z-index:20;min-height:44px;
-  padding:.75rem 1.4rem;font-family:'Poppins',sans-serif;font-weight:600;color:#fff;
-  background:var(--primary);border:none;border-radius:999px;cursor:pointer;
-  box-shadow:0 8px 30px rgba(124,58,237,.5);transition:background .2s,transform .2s}
-.ft-fab:hover{background:var(--primary-glow);transform:translateY(-2px)}
-.ft-fab:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+.ft-dock{position:fixed;right:1.5rem;bottom:1.5rem;z-index:20;display:flex;
+  flex-direction:column;align-items:flex-end;gap:.5rem}
+.ft-gear{width:44px;height:44px;font-size:1.15rem;line-height:1;color:var(--muted);
+  background:var(--surface);border:1px solid var(--border);border-radius:50%;cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,.4);transition:color .2s,border-color .2s,transform .2s}
+.ft-gear:hover{color:var(--fg);border-color:var(--primary-glow);transform:rotate(45deg)}
+.ft-gear:focus-visible{outline:2px solid var(--primary-glow);outline-offset:3px}
+.ft-menu{display:flex;flex-direction:column;gap:.35rem;padding:.4rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.ft-item{min-height:40px;padding:.5rem 1.1rem;font-family:'Poppins',sans-serif;
+  font-size:.85rem;font-weight:600;color:var(--fg);background:none;border:none;
+  border-radius:10px;cursor:pointer;white-space:nowrap;text-align:right;
+  transition:background .15s,color .15s}
+.ft-item:hover{background:var(--surface-2);color:var(--primary-glow)}
+.ft-item:focus-visible{outline:2px solid var(--primary-glow);outline-offset:-2px}
 .ft-overlay{position:fixed;inset:0;z-index:30;display:flex;align-items:center;
   justify-content:center;padding:1.25rem;background:rgba(6,4,12,.72)}
 .ft-panel{position:relative;width:min(30rem,100%);padding:2rem;background:var(--surface);
@@ -341,8 +350,20 @@ def _fine_tune_wizard(playlists, prefs) -> str:
             ("adventurous", "Adventurous &mdash; bold matches"),
         )
     )
+    # Reset only appears once something is actually tuned -- offering to reset
+    # nothing is noise.
+    tuned = any(prefs.get(k) != v for k, v in db.DEFAULT_PREFS.items())
+    reset = (
+        '<button id="ft-reset" class="ft-item" type="button">Reset</button>' if tuned else ""
+    )
     return (
-        '<button id="ft-open" class="ft-fab" type="button">Fine-tune</button>'
+        '<div class="ft-dock">'
+        '<div id="ft-menu" class="ft-menu" hidden>'
+        '<button id="ft-open" class="ft-item" type="button">Fine-tune</button>'
+        f"{reset}</div>"
+        '<button id="ft-gear" class="ft-gear" type="button" aria-expanded="false" '
+        'aria-controls="ft-menu" aria-label="Recommendation settings">&#9881;</button>'
+        "</div>"
         '<div id="ft-overlay" class="ft-overlay" hidden>'
         '<div class="ft-panel">'
         '<button id="ft-close" class="ft-close" type="button" aria-label="Close">&times;</button>'
@@ -649,7 +670,30 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
     }, 220);
   }
   function reset(){ steps.forEach(function(s,i){ s.hidden = i!==0; }); at=0; }
+  function tune(body){
+    fetch('/fine-tune',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    }).then(function(){ window.location.href='/?next=/recommendations'; })
+      .catch(function(){ window.location.href='/?next=/recommendations'; });
+  }
+  var gear=document.getElementById('ft-gear'), menu=document.getElementById('ft-menu');
+  gear.addEventListener('click', function(e){
+    e.stopPropagation();
+    var open = menu.hidden;
+    menu.hidden = !open;
+    gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.addEventListener('click', function(){
+    menu.hidden = true; gear.setAttribute('aria-expanded','false');
+  });
+  menu.addEventListener('click', function(e){ e.stopPropagation(); });
+  var resetBtn=document.getElementById('ft-reset');
+  if(resetBtn){ resetBtn.addEventListener('click', function(){
+    this.disabled=true; this.textContent='Resetting\\u2026';
+    tune({playlists:[], discovery:'mix', mode:'safe'});
+  }); }
   document.getElementById('ft-open').addEventListener('click', function(){
+    menu.hidden=true; gear.setAttribute('aria-expanded','false');
     reset(); overlay.hidden=false;
   });
   document.getElementById('ft-close').addEventListener('click', function(){
@@ -668,14 +712,7 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
       return el ? el.value : null;
     }
     this.disabled=true; this.textContent='Tuning\\u2026';
-    fetch('/fine-tune',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({playlists:picked, discovery:radio('discovery'), mode:radio('mode')})
-    }).then(function(){
-      window.location.href='/?next=/recommendations';
-    }).catch(function(){
-      window.location.href='/?next=/recommendations';
-    });
+    tune({playlists:picked, discovery:radio('discovery'), mode:radio('mode')});
   });
 })();
 </script>
