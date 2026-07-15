@@ -528,6 +528,78 @@ def test_top_artists_excludes_covers_and_unverified():
     assert db.get_top_artists(conn, uid) == [("Real", 1)]
 
 
+def test_clean_seed_songs_only_uses_the_most_recent_liked_songs():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-16T00:00:00")
+    # rows are stored newest-first, in the order YouTube returns them
+    db.replace_liked_videos(
+        conn,
+        uid,
+        [
+            {"video_id": f"v{i}", "title": f"song {i}", "channel_title": "A - Topic"}
+            for i in range(60)
+        ],
+    )
+    seeds = db.get_clean_seed_songs(conn, uid)
+    assert len(seeds) == db.RECENT_LIKED_SEEDS
+    assert ("A", "song 0") in seeds  # newest kept
+    assert ("A", "song 59") not in seeds  # oldest dropped
+
+
+def test_clean_seed_songs_keeps_every_playlist_song():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-16T00:00:00")
+    db.replace_playlists(
+        conn,
+        uid,
+        [
+            {
+                "playlist_id": "p1",
+                "title": "PL",
+                "items": [
+                    {
+                        "video_id": f"p{i}",
+                        "title": f"pl song {i}",
+                        "channel_title": "B - Topic",
+                        "category_id": "10",
+                    }
+                    for i in range(70)
+                ],
+            }
+        ],
+    )
+    assert len(db.get_clean_seed_songs(conn, uid)) == 70  # playlists are not capped
+
+
+def test_clean_seed_songs_dedupes_a_song_both_liked_and_in_a_playlist():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-16T00:00:00")
+    song = {"video_id": "v1", "title": "Song", "channel_title": "A - Topic"}
+    db.replace_liked_videos(conn, uid, [song])
+    db.replace_playlists(
+        conn,
+        uid,
+        [{"playlist_id": "p1", "title": "PL", "items": [dict(song, category_id="10")]}],
+    )
+    assert db.get_clean_seed_songs(conn, uid) == [("A", "Song")]
+
+
+def test_clean_seed_songs_ignores_resolved_songs_outside_the_recent_window():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-16T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        uid,
+        [
+            {"video_id": f"v{i}", "title": f"song {i}", "channel_title": "A - Topic"}
+            for i in range(60)
+        ],
+    )
+    # v59 is the oldest liked song, outside the 50-song window
+    db.upsert_resolved_song(conn, "v59", "Old Artist", "Old Track", False, True, 9999)
+    assert ("Old Artist", "Old Track") not in db.get_clean_seed_songs(conn, uid)
+
+
 def test_clean_seed_songs_includes_resolved_songs_including_covers():
     conn = make_conn()
     uid = _user_with_songs(

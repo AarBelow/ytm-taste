@@ -9,6 +9,11 @@ from collections import Counter
 # junk resolutions topped out ~260 listeners; genuine artists cleared thousands.
 MIN_CREDIT_LISTENERS = 2000
 
+# Only the most recent liked songs seed recommendations, so suggestions track what
+# you're into lately. Playlists are never capped. YouTube returns likes newest-first
+# (observed, not documented), so insertion order is recency order.
+RECENT_LIKED_SEEDS = 50
+
 
 def get_connection(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
@@ -277,24 +282,41 @@ def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, i
 
 
 def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str]]:
-    rows = conn.execute(
+    liked = conn.execute(
+        "SELECT video_id, channel_title, title FROM liked_videos "
+        "WHERE user_id = ? ORDER BY id LIMIT ?",
+        (user_id, RECENT_LIKED_SEEDS),
+    ).fetchall()
+    playlist = conn.execute(
         """
-        SELECT channel_title, title FROM liked_videos
-        WHERE user_id = ? AND channel_title LIKE '% - Topic'
-        UNION ALL
-        SELECT pi.channel_title, pi.title
+        SELECT pi.video_id, pi.channel_title, pi.title
         FROM playlist_items pi
         JOIN playlists p ON p.id = pi.playlist_row_id
         WHERE p.user_id = ? AND pi.category_id = '10'
-              AND pi.channel_title LIKE '% - Topic'
         """,
-        (user_id, user_id),
+        (user_id,),
     ).fetchall()
-    seeds = [(normalize_artist(channel), title) for channel, title in rows]
-    for _vid, artist, track, _is_cover, _listeners in _resolved_for_user(conn, user_id):
-        if artist and track:
+    rows = list(liked) + list(playlist)
+    eligible = {video_id for video_id, _channel, _title in rows}
+
+    seeds: list[tuple[str, str]] = []
+    for _video_id, channel_title, title in rows:
+        if channel_title and channel_title.endswith(" - Topic"):
+            seeds.append((normalize_artist(channel_title), title))
+    for video_id, artist, track, _is_cover, _listeners in _resolved_for_user(conn, user_id):
+        if artist and track and video_id in eligible:
             seeds.append((artist, track))
-    return seeds
+
+    # A song that is both liked and sitting in a playlist must not take two seed slots.
+    deduped: list[tuple[str, str]] = []
+    seen = set()
+    for artist, track in seeds:
+        key = (artist.casefold(), track.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((artist, track))
+    return deduped
 
 
 def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str, str]]:
