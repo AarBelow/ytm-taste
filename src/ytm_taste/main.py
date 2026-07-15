@@ -70,9 +70,9 @@ a:hover{text-decoration:underline}
 .rank{font-family:'Righteous',cursive;color:var(--primary-glow);width:1.5rem}
 .count{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .empty{color:var(--muted)}
-.recs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+.recs{display:flex;flex-wrap:wrap;justify-content:center;align-items:stretch;
   gap:1.25rem;list-style:none;padding:0;margin:1.5rem 0}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+.card{flex:0 0 170px;background:var(--surface);border:1px solid var(--border);border-radius:16px;
   padding:1rem;text-align:center;cursor:pointer;transition:transform .2s,box-shadow .2s}
 .card:hover{transform:translateY(-4px);box-shadow:0 0 24px rgba(124,58,237,.45)}
 .cover-wrap{position:relative;width:120px;height:120px;margin:0 auto .75rem}
@@ -143,8 +143,8 @@ a:hover{text-decoration:underline}
 .pagenav-title{font-family:'Righteous',cursive;font-size:1.05rem;color:var(--primary-glow)}
 .pagenav-link.next{margin-left:auto;text-align:right}
 .pagenav-link.prev{margin-right:auto}
-.pagenav-link.next .pagenav-title::after{content:" \\2192"}
-.pagenav-link.prev .pagenav-title::before{content:"\\2190 "}
+.pagenav-link.next .pagenav-title::after{content:"\\2192";margin-left:.4rem}
+.pagenav-link.prev .pagenav-title::before{content:"\\2190";margin-right:.4rem}
 .topbar{display:flex;margin:0 0 1.5rem}
 .home-link{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1rem;
   font-family:'Righteous',cursive;font-size:.95rem;color:var(--primary-glow);
@@ -489,20 +489,39 @@ def render_recommendations_page(recs) -> str:
             f'<div class="track">{html.escape(track)}</div>'
             f"{audio}</li>"
         )
-    more = '<button id="more-btn" class="more-btn">Show 5 more</button>' if len(recs) > 5 else ""
+    more = (
+        '<button id="refresh-btn" class="more-btn" type="button">'
+        '<span class="refresh-ic" aria-hidden="true">&#8635;</span> Refresh</button>'
+        if len(recs) > 5
+        else ""
+    )
     script = """
 <script>
-document.querySelectorAll('.card').forEach(function(card){
+var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+cards.forEach(function(card){
   var a = card.querySelector('audio');
   if(a){ a.volume = 0.25; }
   card.addEventListener('mouseenter', function(){ if(a){ a.play().catch(function(){}); } });
   card.addEventListener('mouseleave', function(){ if(a){ a.pause(); a.currentTime = 0; } });
 });
-var moreBtn = document.getElementById('more-btn');
-if(moreBtn){ moreBtn.addEventListener('click', function(){
-  var hidden = document.querySelectorAll('.card.hidden');
-  for(var i=0;i<5 && i<hidden.length;i++){ hidden[i].classList.remove('hidden'); }
-  if(document.querySelectorAll('.card.hidden').length===0){ moreBtn.style.display='none'; }
+var PAGE = 5;
+var pages = Math.ceil(cards.length / PAGE);
+var page = 0;
+function showPage(p){
+  var start = p * PAGE;
+  cards.forEach(function(card, i){
+    var visible = i >= start && i < start + PAGE;
+    card.classList.toggle('hidden', !visible);
+    if(!visible){
+      var a = card.querySelector('audio');
+      if(a){ a.pause(); a.currentTime = 0; }
+    }
+  });
+}
+var refreshBtn = document.getElementById('refresh-btn');
+if(refreshBtn){ refreshBtn.addEventListener('click', function(){
+  page = (page + 1) % pages;
+  showPage(page);
 }); }
 </script>
 """

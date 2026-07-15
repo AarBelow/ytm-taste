@@ -408,9 +408,25 @@ def test_recommendations_page_has_show_more_when_over_five(monkeypatch, tmp_path
     conn.close()
 
     body = client.get("/recommendations").text
-    assert "more-btn" in body
+    assert "refresh-btn" in body
+    assert "Refresh" in body
+    assert "Show 5 more" not in body  # replaced by the refresh cycle
     assert body.count("card") >= 7
     assert "hidden" in body
+
+
+def test_recommendations_grid_is_centered():
+    # auto-fill left empty tracks that shoved the 5 cards against the left edge.
+    recs_rule = main.BASE_STYLES.split(".recs{")[1].split("}")[0]
+    assert "justify-content:center" in recs_rule
+    assert "auto-fill" not in recs_rule
+
+
+def test_pagenav_arrow_is_spaced_from_the_title():
+    # A trailing space inside CSS `content` does not render; use a margin so the
+    # arrow doesn't collide with the page title.
+    assert 'content:"\\2190";margin-right' in main.BASE_STYLES
+    assert 'content:"\\2192";margin-left' in main.BASE_STYLES
 
 
 def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):
