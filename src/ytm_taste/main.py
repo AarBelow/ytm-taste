@@ -131,6 +131,14 @@ a:hover{text-decoration:underline}
   letter-spacing:.04em;margin:0 0 .4rem}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
+.topbar{display:flex;margin:0 0 1.5rem}
+.home-link{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1rem;
+  font-family:'Righteous',cursive;font-size:.95rem;color:var(--primary-glow);
+  background:var(--surface);border:1px solid var(--border);border-radius:999px;
+  transition:border-color .2s,box-shadow .2s,transform .2s}
+.home-link::before{content:"\\2190";font-family:'Poppins',sans-serif}
+.home-link:hover{text-decoration:none;transform:translateY(-2px);border-color:var(--primary-glow);
+  box-shadow:0 0 18px rgba(124,58,237,.4)}
 .landing{min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;gap:1rem;padding:2rem 0;position:relative;animation:cardIn .6s ease backwards}
 .landing::before{content:"";position:absolute;top:8%;left:50%;width:min(680px,90%);height:340px;
@@ -236,7 +244,11 @@ def _safe_next(value) -> str:
     return value if value in _ALLOWED_NEXT else "/artists"
 
 
-def render_landing_page() -> str:
+def _topbar() -> str:
+    return '<header class="topbar"><a class="home-link" href="/">ytm-taste</a></header>'
+
+
+def render_landing_page(logged_in: bool = False) -> str:
     tiles = (
         '<a class="tile" href="/artists"><span class="tile-ic">&#127911;</span>'
         '<span class="tile-h">Top Artists</span>'
@@ -253,15 +265,22 @@ def render_landing_page() -> str:
         + "".join("<span></span>" for _ in range(7))
         + "</div>"
     )
+    if logged_in:
+        blurb = "Your top artists, song recs, and instant previews are ready."
+        cta = '<a class="cta" href="/artists">View your taste &rarr;</a>'
+    else:
+        blurb = (
+            "Connect your YouTube account for your top artists, song recs, and instant previews."
+        )
+        cta = '<a class="cta" href="/login">Connect YouTube</a>'
     body = (
         '<div class="landing">'
         '<p class="eyebrow2">YouTube Music &middot; Taste Analyzer</p>'
         '<h1 class="wordmark">ytm-taste</h1>'
         '<p class="lead">Your listening, decoded.</p>'
-        '<p class="lead-sub">Connect your YouTube account for your top artists, '
-        "song recs, and instant previews.</p>"
+        f'<p class="lead-sub">{blurb}</p>'
         f"{eq}"
-        '<a class="cta" href="/login">Connect YouTube</a>'
+        f"{cta}"
         f'<div class="tiles">{tiles}</div>'
         "</div>"
     )
@@ -350,7 +369,7 @@ def artist_avatar(artist: str):
 def render_results_page(artists) -> str:
     if not artists:
         body = (
-            "<h1>Your Top Artists</h1>"
+            f"{_topbar()}<h1>Your Top Artists</h1>"
             '<p class="empty">No liked music synced yet — if you just logged in, '
             "give it a few seconds and refresh.</p>"
             '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
@@ -361,7 +380,7 @@ def render_results_page(artists) -> str:
     ranked = "".join(_artist_card(a, hero=False) for a in artists[1:])
     ranked_block = f'<ul class="ranked">{ranked}</ul>' if ranked else ""
     body = (
-        "<h1>Your Top Artists</h1>"
+        f"{_topbar()}<h1>Your Top Artists</h1>"
         '<p class="sub">Your most-played artists across likes and playlists.</p>'
         f"{hero}{ranked_block}"
         '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
@@ -416,7 +435,7 @@ def _artist_card(a, hero: bool) -> str:
 def render_recommendations_page(recs) -> str:
     if not recs:
         body = (
-            "<h1>Songs You Might Like</h1>"
+            f"{_topbar()}<h1>Songs You Might Like</h1>"
             '<p class="empty">No recommendations yet — after you log in, the sync '
             "generates them in the background; give it a moment and refresh.</p>"
             '<p><a href="/artists">&larr; back to your top artists</a></p>'
@@ -461,7 +480,7 @@ if(moreBtn){ moreBtn.addEventListener('click', function(){
 </script>
 """
     body = (
-        "<h1>Songs You Might Like</h1>"
+        f"{_topbar()}<h1>Songs You Might Like</h1>"
         '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
         f'<ul class="recs">{"".join(cards)}</ul>'
         f"{more}"
@@ -475,16 +494,20 @@ if(moreBtn){ moreBtn.addEventListener('click', function(){
 def read_root(request: Request):
     user_id = request.session.get("user_id")
     if user_id is None:
-        return HTMLResponse(render_landing_page())
-    pending = _safe_next(request.query_params.get("next") or request.session.get("post_sync_next"))
+        return HTMLResponse(render_landing_page(logged_in=False))
+    # A pending target is a one-shot intent (from login, or a gated page bouncing
+    # here mid-sync). Consume it; without one, "/" is just the landing page, which
+    # is what the Home button wants.
+    explicit = request.query_params.get("next") or request.session.pop("post_sync_next", None)
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
     ready = db.is_sync_ready(conn, user_id)
     conn.close()
-    if ready:
-        request.session.pop("post_sync_next", None)
-        return RedirectResponse(pending)
-    return HTMLResponse(render_loading_page(pending))
+    if not ready:
+        return HTMLResponse(render_loading_page(_safe_next(explicit)))
+    if explicit:
+        return RedirectResponse(_safe_next(explicit))
+    return HTMLResponse(render_landing_page(logged_in=True))
 
 
 @app.get("/artists")

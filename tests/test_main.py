@@ -610,6 +610,34 @@ def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
     assert "youtube.com/channel/" not in body
 
 
+def test_home_shows_landing_for_logged_in_user_with_no_pending_target(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    # First / consumes the pending target from login and forwards to /artists.
+    assert client.get("/").headers["location"] == "/artists"
+    # Clicking Home afterwards has no pending target, so / is the landing itself.
+    body = client.get("/").text
+    assert "View your taste" in body
+    assert "Connect YouTube" not in body  # already connected
+
+
+def test_home_still_honours_explicit_next_when_ready(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    client.get("/")  # drain the pending target from login
+    r = client.get("/?next=/recommendations")
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/recommendations"
+
+
+def test_artists_and_recommendations_have_home_button(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    for path in ("/artists", "/recommendations"):
+        body = client.get(path).text
+        assert 'class="home-link" href="/"' in body
+
+
 def test_loading_page_only_navigates_when_ready():
     page = main.render_loading_page("/artists")
     # The ONLY navigation is the ready path. A fail-safe redirect here would
