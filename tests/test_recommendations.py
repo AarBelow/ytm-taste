@@ -113,6 +113,18 @@ def test_rank_sums_match_scores_and_excludes_owned():
     assert all(artist != "Owned Band" for artist, _track, _score in result)
 
 
+def test_rank_keeps_fifty_recommendations_by_default():
+    # 10 pages of 5, so Refresh shows new songs instead of looping after 5 clicks.
+    # 50 is where this library's scores flatten out: rank 25 scores 1.04, rank 50
+    # scores 0.98, and only 43 songs score >= 1.0 at all. Past ~50 every remaining
+    # song is one seed weakly mentioning it once.
+    similar = [
+        [{"artist": f"A{i}", "track": f"T{i}", "match": 1.0 - i / 1000} for i in range(200)]
+    ]
+    assert len(recommendations.rank(similar, owned_keys=set())) == 50
+    assert recommendations.MAX_RECOMMENDATIONS == 50
+
+
 def test_rank_caps_at_limit():
     similar_by_seed = [
         [{"artist": f"A{i}", "track": f"T{i}", "match": float(i)} for i in range(10)]
@@ -123,5 +135,5 @@ def test_rank_caps_at_limit():
     assert result[0] == ("A9", "T9", 9.0)
 
 
-def test_max_recommendations_is_25():
-    assert recommendations.MAX_RECOMMENDATIONS == 25
+def test_max_recommendations_is_50():
+    assert recommendations.MAX_RECOMMENDATIONS == 50

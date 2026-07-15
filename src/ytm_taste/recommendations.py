@@ -2,7 +2,14 @@
 from collections import defaultdict
 
 MAX_SEED_SONGS = 100
-MAX_RECOMMENDATIONS = 25
+
+# 10 pages of 5, so Refresh keeps showing new songs instead of looping after 5 clicks.
+# The ranker produces ~1,364 usable candidates, so this is purely where we choose to
+# stop -- and 50 is where the scores flatten: measured on the real library, rank 25
+# scores 1.04 and rank 50 scores 0.98, while only 43 songs score >= 1.0 at all. Past
+# ~50, every remaining song is a single seed weakly mentioning it once (rank 100 =
+# 0.65, rank 200 = 0.34), so a deeper pool would just be padding.
+MAX_RECOMMENDATIONS = 50
 
 # The top 5 artists split TOP_BUDGET of the seeds by these shares; artists 6-10
 # share the rest. Without a quota, plain rank-ordering lets the top-ranked artist's
