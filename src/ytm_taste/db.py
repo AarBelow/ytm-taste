@@ -2,6 +2,13 @@
 import sqlite3
 from collections import Counter
 
+# Last.fm's catalogue comes from scrobbles, so a mis-split title like "05" or
+# "平行線" can still "exist" with a few hundred listeners. Seeds tolerate that (a
+# wrong seed is cheap), but crediting a fake artist on the top-artists page is
+# loud, so credit requires real popularity. Measured against the live library:
+# junk resolutions topped out ~260 listeners; genuine artists cleared thousands.
+MIN_CREDIT_LISTENERS = 2000
+
 
 def get_connection(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
@@ -83,10 +90,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             artist TEXT,
             track TEXT,
             is_cover INTEGER NOT NULL DEFAULT 0,
-            ok INTEGER NOT NULL
+            ok INTEGER NOT NULL,
+            listeners INTEGER NOT NULL DEFAULT 0
         );
         """
     )
+    rcols = [r[1] for r in conn.execute("PRAGMA table_info(resolved_songs)").fetchall()]
+    if "listeners" not in rcols:
+        conn.execute("ALTER TABLE resolved_songs ADD COLUMN listeners INTEGER NOT NULL DEFAULT 0")
     cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
     if "album_art_url" not in cols:
         conn.execute("ALTER TABLE artist_details ADD COLUMN album_art_url TEXT")
@@ -204,11 +215,11 @@ def normalize_artist(name: str) -> str:
     return name
 
 
-def _resolved_for_user(conn, user_id) -> list[tuple[str, str, str, int]]:
-    """(video_id, artist, track, is_cover) for this user's successfully resolved songs."""
+def _resolved_for_user(conn, user_id) -> list[tuple[str, str, str, int, int]]:
+    """(video_id, artist, track, is_cover, listeners) for this user's resolved songs."""
     return conn.execute(
         """
-        SELECT rs.video_id, rs.artist, rs.track, rs.is_cover FROM resolved_songs rs
+        SELECT rs.video_id, rs.artist, rs.track, rs.is_cover, rs.listeners FROM resolved_songs rs
         WHERE rs.ok = 1 AND rs.video_id IN (
             SELECT video_id FROM liked_videos WHERE user_id = ?
             UNION
@@ -234,22 +245,35 @@ def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, i
         (user_id, user_id),
     ).fetchall()
     resolved = {
-        vid: (artist, is_cover)
-        for vid, artist, _track, is_cover in _resolved_for_user(conn, user_id)
+        vid: (artist, is_cover, listeners)
+        for vid, artist, _track, is_cover, listeners in _resolved_for_user(conn, user_id)
     }
+    # Counted case-insensitively: YouTube's Topic channel ("Kaz Moon") and Last.fm's
+    # canonical spelling ("kaz moon") are the same artist and must not split in two.
     counts: Counter = Counter()
+    spellings: dict[str, Counter] = {}
+
+    def credit(name: str) -> None:
+        key = name.casefold()
+        counts[key] += 1
+        spellings.setdefault(key, Counter())[name] += 1
+
     for video_id, channel_title in rows:
         if channel_title and channel_title.endswith(" - Topic"):
-            counts[normalize_artist(channel_title)] += 1
+            credit(normalize_artist(channel_title))
             continue
         entry = resolved.get(video_id)
         if entry is None:
             continue  # unverified: no credit
-        artist, is_cover = entry
+        artist, is_cover, listeners = entry
         if is_cover or not artist:
             continue  # covers seed but never get credit
-        counts[artist] += 1
-    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if listeners < MIN_CREDIT_LISTENERS:
+            continue  # too obscure to trust as an artist name; it still seeds
+        credit(artist)
+    # Display the spelling we saw most often for each artist.
+    named = [(spellings[key].most_common(1)[0][0], count) for key, count in counts.items()]
+    return sorted(named, key=lambda kv: (-kv[1], kv[0]))
 
 
 def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str]]:
@@ -267,7 +291,7 @@ def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[s
         (user_id, user_id),
     ).fetchall()
     seeds = [(normalize_artist(channel), title) for channel, title in rows]
-    for _vid, artist, track, _is_cover in _resolved_for_user(conn, user_id):
+    for _vid, artist, track, _is_cover, _listeners in _resolved_for_user(conn, user_id):
         if artist and track:
             seeds.append((artist, track))
     return seeds
@@ -290,7 +314,7 @@ def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str
         if channel is None:
             continue
         keys.add((normalize_artist(channel).lower().strip(), title.lower().strip()))
-    for _vid, artist, track, _is_cover in _resolved_for_user(conn, user_id):
+    for _vid, artist, track, _is_cover, _listeners in _resolved_for_user(conn, user_id):
         if artist and track:
             keys.add((artist.lower().strip(), track.lower().strip()))
     return keys
@@ -381,13 +405,13 @@ def is_sync_ready(conn, user_id) -> bool:
     return bool(row) and row[0] == 0
 
 
-def upsert_resolved_song(conn, video_id, artist, track, is_cover, ok) -> None:
+def upsert_resolved_song(conn, video_id, artist, track, is_cover, ok, listeners=0) -> None:
     conn.execute(
-        "INSERT INTO resolved_songs (video_id, artist, track, is_cover, ok) "
-        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET "
+        "INSERT INTO resolved_songs (video_id, artist, track, is_cover, ok, listeners) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET "
         "artist=excluded.artist, track=excluded.track, "
-        "is_cover=excluded.is_cover, ok=excluded.ok",
-        (video_id, artist, track, 1 if is_cover else 0, 1 if ok else 0),
+        "is_cover=excluded.is_cover, ok=excluded.ok, listeners=excluded.listeners",
+        (video_id, artist, track, 1 if is_cover else 0, 1 if ok else 0, int(listeners or 0)),
     )
 
 

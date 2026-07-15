@@ -453,7 +453,8 @@ def test_run_sync_resolves_non_topic_songs(tmp_path):
 
     def verify(api_key, artist, track):
         if artist == "android 52":
-            return {"artist": "android 52", "track": "romance"}
+            # listeners must clear MIN_CREDIT_LISTENERS for the artist to be credited
+            return {"artist": "android 52", "track": "romance", "listeners": 5000}
         return None
 
     sync.run_sync(

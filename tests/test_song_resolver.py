@@ -51,30 +51,45 @@ def test_candidates_are_deduped_and_drop_empty_parts():
     assert got == [("Eve", "Eve")]
 
 
-def test_resolve_returns_first_verified_candidate_with_canonical_names():
-    calls = []
-
+def test_resolve_returns_the_verified_candidate_with_canonical_names():
     def verify(artist, track):
-        calls.append((artist, track))
         # only the reversed split is real: "Eve x suis" / "平行線"
         if artist == "Eve x suis" and track == "平行線":
-            return {"artist": "Eve", "track": "平行線"}
+            return {"artist": "Eve", "track": "平行線", "listeners": 52}
         return None
 
     got = song_resolver.resolve("Eve", "平行線 - Eve x suis", verify)
-    assert got == {"artist": "Eve", "track": "平行線", "is_cover": False}
-    assert calls[0] == ("平行線", "Eve x suis")  # tried the forward split first
+    assert got == {"artist": "Eve", "track": "平行線", "listeners": 52, "is_cover": False}
 
 
-def test_resolve_stops_calling_verify_after_the_first_hit():
+def test_resolve_picks_the_candidate_with_the_most_listeners_not_the_first():
+    # Real case from the library: "Memories - Maroon 5 ( Gawr Gura cover)".
+    # The forward split is a real Last.fm entry (185 scrobbled listeners) but it is
+    # BACKWARDS. The reversed split is the true song (720k). First-hit-wins picked
+    # the wrong one, so resolve must weigh candidates by listeners.
+    def verify(artist, track):
+        if (artist, track) == ("Memories", "Maroon 5"):
+            return {"artist": "Memories", "track": "MAROON 5", "listeners": 185}
+        if (artist, track) == ("Maroon 5", "Memories"):
+            return {"artist": "Maroon 5", "track": "Memories", "listeners": 720496}
+        return None
+
+    got = song_resolver.resolve("BC", "Memories - Maroon 5 ( Gawr Gura cover)", verify)
+    assert got["artist"] == "Maroon 5"
+    assert got["track"] == "Memories"
+    assert got["listeners"] == 720496
+    assert got["is_cover"] is True
+
+
+def test_resolve_evaluates_every_candidate():
     calls = []
 
     def verify(artist, track):
         calls.append((artist, track))
-        return {"artist": artist, "track": track}
+        return {"artist": artist, "track": track, "listeners": 1}
 
     song_resolver.resolve("Ch", "A - B", verify)
-    assert len(calls) == 1
+    assert len(calls) == 3  # forward split, reversed split, channel-as-artist
 
 
 def test_resolve_returns_none_when_nothing_verifies():
@@ -85,6 +100,10 @@ def test_resolve_returns_none_when_nothing_verifies():
 def test_resolve_marks_covers_from_the_raw_title():
     got = song_resolver.resolve(
         "BC", "Memories - Maroon 5 ( Gawr Gura cover)",
-        lambda a, t: {"artist": "Maroon 5", "track": "Memories"} if a == "Maroon 5" else None,
+        lambda a, t: (
+            {"artist": "Maroon 5", "track": "Memories", "listeners": 9}
+            if a == "Maroon 5"
+            else None
+        ),
     )
-    assert got == {"artist": "Maroon 5", "track": "Memories", "is_cover": True}
+    assert got == {"artist": "Maroon 5", "track": "Memories", "listeners": 9, "is_cover": True}

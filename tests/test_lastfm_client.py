@@ -139,10 +139,19 @@ def test_fetch_artist_info_none_when_missing():
     )
 
 
-def test_verify_track_returns_canonical_names():
-    data = {"track": {"name": "romance", "artist": {"name": "android 52"}}}
+def test_verify_track_returns_canonical_names_and_listeners():
+    data = {
+        "track": {"name": "romance", "artist": {"name": "android 52"}, "listeners": "1177"}
+    }
     got = lastfm_client.verify_track("K", "android52", "romance", get_fn=make_get(data, []))
-    assert got == {"artist": "android 52", "track": "romance"}
+    assert got == {"artist": "android 52", "track": "romance", "listeners": 1177}
+
+
+def test_verify_track_listeners_defaults_to_zero_when_absent_or_junk():
+    data = {"track": {"name": "T", "artist": {"name": "A"}}}
+    assert lastfm_client.verify_track("K", "A", "T", get_fn=make_get(data, []))["listeners"] == 0
+    junk = {"track": {"name": "T", "artist": {"name": "A"}, "listeners": "not-a-number"}}
+    assert lastfm_client.verify_track("K", "A", "T", get_fn=make_get(junk, []))["listeners"] == 0
 
 
 def test_verify_track_uses_autocorrect_and_track_getinfo():

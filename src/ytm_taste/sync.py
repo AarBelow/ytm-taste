@@ -88,7 +88,7 @@ def run_sync(
                     if found:
                         db.upsert_resolved_song(
                             conn, song["video_id"], found["artist"], found["track"],
-                            found["is_cover"], True,
+                            found["is_cover"], True, found.get("listeners", 0),
                         )
                     else:
                         db.upsert_resolved_song(conn, song["video_id"], None, None, False, False)

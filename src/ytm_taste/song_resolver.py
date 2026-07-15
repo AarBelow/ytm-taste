@@ -55,12 +55,25 @@ def candidates(channel_title, title) -> list[tuple[str, str]]:
 
 
 def resolve(channel_title, title, verify_fn) -> dict | None:
+    """Pick the most-listened candidate, not the first that verifies.
+
+    Both dash orderings often "exist" on Last.fm, because its catalogue comes from
+    scrobbles -- "Memories"/"Maroon 5" (185 listeners) is a real entry even though it
+    is backwards. Weighing candidates by listeners picks the true one (720k) instead
+    of whichever happened to be tried first.
+    """
+    best = None
     for artist, track in candidates(channel_title, title):
         found = verify_fn(artist, track)
-        if found:
-            return {
-                "artist": found["artist"],
-                "track": found["track"],
-                "is_cover": is_cover(title),
-            }
-    return None
+        if not found:
+            continue
+        if best is None or found.get("listeners", 0) > best.get("listeners", 0):
+            best = found
+    if best is None:
+        return None
+    return {
+        "artist": best["artist"],
+        "track": best["track"],
+        "listeners": best.get("listeners", 0),
+        "is_cover": is_cover(title),
+    }

@@ -118,4 +118,10 @@ def verify_track(api_key, artist, track, get_fn=requests.get) -> dict | None:
     artist_name = (found.get("artist") or {}).get("name")
     if not name or not artist_name:
         return None
-    return {"artist": artist_name, "track": name}
+    # Last.fm's catalogue is built from scrobbles, so almost any string "exists".
+    # Listener count is what separates a real song from a stray scrobble.
+    try:
+        listeners = int(found.get("listeners") or 0)
+    except (TypeError, ValueError):
+        listeners = 0
+    return {"artist": artist_name, "track": name, "listeners": listeners}

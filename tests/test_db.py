@@ -462,8 +462,55 @@ def test_top_artists_credits_resolved_artist_not_the_uploader():
     uid = _user_with_songs(
         conn, [{"video_id": "v1", "title": "android 52 - romance", "channel_title": "Ethan"}]
     )
-    db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True)
+    db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True, 5000)
     assert db.get_top_artists(conn, uid) == [("android 52", 1)]
+
+
+def test_top_artists_merges_artists_that_differ_only_by_case():
+    # YouTube's Topic channel says "Kaz Moon"; Last.fm's canonical spelling is
+    # "kaz moon". Same artist -- they must not split into two entries.
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn,
+        [
+            {"video_id": "v1", "title": "S1", "channel_title": "Kaz Moon - Topic"},
+            {"video_id": "v2", "title": "S2", "channel_title": "Kaz Moon - Topic"},
+            {"video_id": "v3", "title": "kaz moon - Furious", "channel_title": "Reup"},
+        ],
+    )
+    db.upsert_resolved_song(conn, "v3", "kaz moon", "Furious", False, True, 41363)
+    # 2 from the Topic channel + 1 resolved = 3, under the dominant spelling
+    assert db.get_top_artists(conn, uid) == [("Kaz Moon", 3)]
+
+
+def test_top_artists_ignores_low_confidence_resolutions():
+    # Listener count is the confidence signal. Junk resolutions ("平行線", "05")
+    # sit in the low hundreds; real artists clear the bar. Below it we decline to
+    # credit anyone rather than put a fake artist on the page.
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn,
+        [
+            {"video_id": "v1", "title": "平行線 - Eve x suis", "channel_title": "Eve"},
+            {"video_id": "v2", "title": "King Gnu - 白日", "channel_title": "Reup"},
+        ],
+    )
+    db.upsert_resolved_song(conn, "v1", "平行線", "Eve x suis", False, True, 52)
+    db.upsert_resolved_song(conn, "v2", "King Gnu", "白日", False, True, 107166)
+    assert db.get_top_artists(conn, uid) == [("King Gnu", 1)]
+
+
+def test_low_confidence_resolutions_still_seed_recommendations():
+    # Seeds are permissive: a wrong seed is cheap, and this is where the
+    # extra taste coverage comes from.
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn, [{"video_id": "v1", "title": "kaz moon - thought we were a team",
+                "channel_title": "Ch"}]
+    )
+    db.upsert_resolved_song(conn, "v1", "kaz moon", "thought we were a team", False, True, 3)
+    assert ("kaz moon", "thought we were a team") in db.get_clean_seed_songs(conn, uid)
+    assert db.get_top_artists(conn, uid) == []  # but no credit at 3 listeners
 
 
 def test_top_artists_excludes_covers_and_unverified():
