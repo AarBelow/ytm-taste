@@ -81,3 +81,44 @@ def test_fetch_artist_album_art_returns_none_when_no_artwork():
         return FakeResponse({"results": [{"collectionName": "Album"}]})
 
     assert itunes_client.fetch_artist_album_art("x", get_fn=fake_get) is None
+
+
+def test_song_meta_asks_for_more_than_one_result_but_uses_the_first():
+    # Measured against the live API: the identical search returns 0 results at
+    # limit=1 but 1 result at limit=3 -- asking for a shorter list makes marginal
+    # matches vanish. Costing us real songs (idealism - Controlla).
+    captured = {}
+
+    def fake_get(url, params=None, timeout=None):
+        captured.update(params)
+        return FakeResponse(
+            {
+                "results": [
+                    {"artworkUrl100": "http://first/100x100bb.jpg", "previewUrl": "http://p1"},
+                    {"artworkUrl100": "http://second/100x100bb.jpg", "previewUrl": "http://p2"},
+                ]
+            }
+        )
+
+    got = itunes_client.fetch_song_meta("A", "T", get_fn=fake_get)
+    assert captured["limit"] > 1
+    assert got == {"image_url": "http://first/600x600bb.jpg", "preview_url": "http://p1"}
+
+
+def test_artist_album_art_asks_for_more_than_one_result_but_uses_the_first():
+    captured = {}
+
+    def fake_get(url, params=None, timeout=None):
+        captured.update(params)
+        return FakeResponse(
+            {
+                "results": [
+                    {"artworkUrl100": "http://first/100x100bb.jpg"},
+                    {"artworkUrl100": "http://second/100x100bb.jpg"},
+                ]
+            }
+        )
+
+    got = itunes_client.fetch_artist_album_art("A", get_fn=fake_get)
+    assert captured["limit"] > 1
+    assert got == "http://first/600x600bb.jpg"

@@ -853,6 +853,15 @@ def _recs_page_with_prefs(client, monkeypatch, tmp_path, prefs=None):
     return db_path, client.get("/recommendations").text
 
 
+def test_missing_cover_shows_a_styled_placeholder_not_an_empty_box():
+    # Apple genuinely lacks some songs (Khantrast, MC Virgins...). An empty box reads
+    # as a broken image; show the artist's initial like we already do for avatars.
+    page = main.render_recommendations_page([("Khantrast", "I'm Toxic", 1.0, None, None)])
+    assert 'class="cover cover-ph"' in page
+    assert ">K</div>" in page
+    assert ".cover-ph{" in main.BASE_STYLES
+
+
 def test_hidden_overlay_and_menu_actually_stay_hidden():
     # `display:flex` on these beats the browser's own [hidden]{display:none} at equal
     # specificity, so without an explicit rule the wizard renders OPEN on page load and

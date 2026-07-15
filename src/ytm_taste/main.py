@@ -78,6 +78,9 @@ a:hover{text-decoration:underline}
 .cover-wrap{position:relative;width:120px;height:120px;margin:0 auto .75rem}
 .cover{width:100%;height:100%;border-radius:12px;object-fit:cover;
   transition:border-radius .3s;background:var(--surface-2)}
+.cover-ph{display:flex;align-items:center;justify-content:center;
+  font-family:'Righteous',cursive;font-size:2.4rem;color:var(--primary-glow);
+  background:linear-gradient(150deg,var(--surface-2),var(--surface))}
 .card:hover .cover{border-radius:50%;animation:spin 3s linear infinite}
 .cover-wrap::after{content:"";position:absolute;top:50%;left:50%;width:14px;height:14px;
   margin:-7px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px rgba(255,255,255,.15);
@@ -602,11 +605,13 @@ def render_recommendations_page(recs, playlists=None, prefs=None) -> str:
     cards = []
     for i, (artist, track, _score, image_url, preview_url) in enumerate(recs):
         hidden = " hidden" if i >= 5 else ""
-        cover = (
-            f'<img class="cover" loading="lazy" src="{html.escape(image_url)}" alt="">'
-            if image_url
-            else '<div class="cover"></div>'
-        )
+        if image_url:
+            cover = f'<img class="cover" loading="lazy" src="{html.escape(image_url)}" alt="">'
+        else:
+            # Apple has no artwork for this song. An empty box looks like a failed
+            # image; the artist's initial reads as deliberate, matching the avatars.
+            initial = html.escape(artist[:1].upper() or "?")
+            cover = f'<div class="cover cover-ph">{initial}</div>'
         audio = (
             f'<audio preload="none" src="{html.escape(preview_url)}"></audio>'
             if preview_url

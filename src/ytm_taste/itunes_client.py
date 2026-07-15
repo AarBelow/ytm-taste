@@ -3,11 +3,22 @@ import requests
 
 API_URL = "https://itunes.apple.com/search"
 
+# iTunes drops marginal matches when asked for a short list: the identical search for
+# "idealism Controlla" returns 0 results at limit=1 but 1 result at limit=3. Ask for a
+# few and use the first; a bad question and a genuinely absent song both return nothing,
+# so this failed silently.
+SEARCH_LIMIT = 3
+
 
 def fetch_song_meta(artist, track, get_fn=requests.get) -> dict | None:
     response = get_fn(
         API_URL,
-        params={"term": f"{artist} {track}", "media": "music", "entity": "song", "limit": 1},
+        params={
+            "term": f"{artist} {track}",
+            "media": "music",
+            "entity": "song",
+            "limit": SEARCH_LIMIT,
+        },
         timeout=10,
     )
     data = response.json()
@@ -28,7 +39,7 @@ def fetch_song_meta(artist, track, get_fn=requests.get) -> dict | None:
 def fetch_artist_album_art(artist, get_fn=requests.get) -> str | None:
     response = get_fn(
         API_URL,
-        params={"term": artist, "media": "music", "entity": "album", "limit": 1},
+        params={"term": artist, "media": "music", "entity": "album", "limit": SEARCH_LIMIT},
         timeout=10,
     )
     data = response.json()
