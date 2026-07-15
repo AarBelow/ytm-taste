@@ -16,15 +16,24 @@ from ytm_taste import db, google_oauth, recommendations, sync, youtube_client
 
 load_dotenv()
 
-# This app's redirect URI is plain HTTP (http://127.0.0.1:8000/auth/callback)
-# since it's local-only by design (no deployment/hosting this cycle). Google's
-# oauthlib refuses to process a non-HTTPS authorization_response URL unless
-# this is set — the standard, documented approach for local OAuth development.
-os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+# Everything that differs between a laptop and a host lives here, so one build
+# serves both. BASE_URL is where users actually reach the app; Google matches the
+# redirect URI against it character-for-character, so it must be the public
+# address, not the address the process happens to bind to.
+BASE_URL = os.environ.get("YTM_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+DB_PATH = os.environ.get("YTM_DB_PATH", "data/ytm_taste.db")
 
-DB_PATH = "data/ytm_taste.db"
+REDIRECT_URI = f"{BASE_URL}/auth/callback"
 
-REDIRECT_URI = "http://127.0.0.1:8000/auth/callback"
+# A loopback redirect is necessarily plain HTTP, and oauthlib refuses a non-HTTPS
+# authorization_response without this — the documented approach for local OAuth.
+# Deployed behind HTTPS it must stay ABSENT, or the check is off in production.
+# There is no way to set it falsely: oauthlib only tests that the variable is
+# non-empty, so "0" would disable the check just as surely as "1". Being unset is
+# the only safe state, which is why this is a conditional and not a value.
+IS_LOCAL_HTTP = BASE_URL.startswith("http://")
+if IS_LOCAL_HTTP:
+    os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 
 def _clear_stale_syncing() -> None:
@@ -49,7 +58,14 @@ async def lifespan(app):
 
 
 app = FastAPI(title="ytm-taste", lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=os.environ["SECRET_KEY"])
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ["SECRET_KEY"],
+    # Deployed, the session cookie must never travel over plain HTTP. Locally the
+    # app *is* plain HTTP, so demanding HTTPS there would stop the browser storing
+    # the cookie at all and nobody could stay logged in.
+    https_only=not IS_LOCAL_HTTP,
+)
 
 BASE_STYLES = """
 :root{--bg:#0c0a14;--surface:#171130;--surface-2:#1e1740;--primary:#7c3aed;

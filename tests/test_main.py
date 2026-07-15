@@ -1,7 +1,33 @@
 # tests/test_main.py
+import importlib
+
 from fastapi.testclient import TestClient
+from starlette.middleware.sessions import SessionMiddleware
 
 from ytm_taste import google_oauth, main, youtube_client
+
+
+def _session_cookie_is_https_only():
+    for middleware in main.app.user_middleware:
+        if middleware.cls is SessionMiddleware:
+            return middleware.kwargs["https_only"]
+    raise AssertionError("SessionMiddleware is not installed")
+
+
+def test_session_cookie_is_https_only_only_once_deployed(monkeypatch):
+    # The session cookie carries the logged-in user_id, so on a public host it
+    # must never travel in the clear. Locally it must NOT be Secure: the app is
+    # plain HTTP there, and the browser would refuse to store the cookie at all,
+    # leaving nobody able to stay logged in.
+    assert _session_cookie_is_https_only() is False
+
+    monkeypatch.setenv("YTM_BASE_URL", "https://ytm.example.com")
+    try:
+        importlib.reload(main)
+        assert _session_cookie_is_https_only() is True
+    finally:
+        monkeypatch.undo()
+        importlib.reload(main)
 
 
 def test_health_returns_status():

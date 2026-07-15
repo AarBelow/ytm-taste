@@ -100,6 +100,54 @@ def test_importing_main_sets_oauthlib_insecure_transport_for_local_http_oauth(mo
     assert os.environ.get("OAUTHLIB_INSECURE_TRANSPORT") == "1"
 
 
+def test_https_base_url_leaves_the_oauthlib_transport_check_on(monkeypatch):
+    # The mirror of the test above, and the one that matters once this is hosted:
+    # deployed behind HTTPS, OAUTHLIB_INSECURE_TRANSPORT must be ABSENT, or the
+    # check we switch off for loopback stays off against real traffic.
+    #
+    # It cannot be disabled by value. oauthlib only asks whether the variable is
+    # non-empty:
+    #
+    #   if os.environ.get('OAUTHLIB_INSECURE_TRANSPORT'):
+    #       return True
+    #
+    # so "0" is truthy and would disable the check exactly as "1" does. Unset is
+    # the only safe state, hence a conditional rather than a value.
+    monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
+    monkeypatch.setenv("YTM_BASE_URL", "https://ytm.example.com")
+
+    from ytm_taste import main
+
+    try:
+        importlib.reload(main)
+
+        assert os.environ.get("OAUTHLIB_INSECURE_TRANSPORT") is None
+        assert main.REDIRECT_URI == "https://ytm.example.com/auth/callback"
+        assert main.IS_LOCAL_HTTP is False
+    finally:
+        # Restore module state for every test after this one: a main configured
+        # for HTTPS sets https_only session cookies, which the TestClient's plain
+        # HTTP requests would silently drop.
+        monkeypatch.undo()
+        importlib.reload(main)
+
+
+def test_base_url_trailing_slash_does_not_corrupt_the_redirect_uri(monkeypatch):
+    # Google matches the redirect URI character-for-character, so a stray slash
+    # pasted into the host's env var would produce ".../auth/callback" preceded by
+    # a double slash and fail every login with redirect_uri_mismatch.
+    monkeypatch.setenv("YTM_BASE_URL", "https://ytm.example.com/")
+
+    from ytm_taste import main
+
+    try:
+        importlib.reload(main)
+        assert main.REDIRECT_URI == "https://ytm.example.com/auth/callback"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(main)
+
+
 def _stored_token(expiry):
     # Shape of what credentials.to_json() saves at login. The refresh_token is
     # the bit that lets us re-sync later without a consent screen.
