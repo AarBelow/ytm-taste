@@ -327,6 +327,12 @@ def set_user_syncing(conn, user_id, syncing) -> None:
     conn.execute("UPDATE users SET syncing = ? WHERE id = ?", (1 if syncing else 0, user_id))
 
 
+def clear_all_syncing(conn) -> None:
+    # `syncing` means "a sync is running in this process", so a freshly started
+    # process can only be looking at flags left behind by a dead one.
+    conn.execute("UPDATE users SET syncing = 0")
+
+
 def is_sync_ready(conn, user_id) -> bool:
     row = conn.execute("SELECT syncing FROM users WHERE id = ?", (user_id,)).fetchone()
     return bool(row) and row[0] == 0

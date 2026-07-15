@@ -610,6 +610,34 @@ def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
     assert "youtube.com/channel/" not in body
 
 
+def test_loading_page_only_navigates_when_ready():
+    page = main.render_loading_page("/artists")
+    # The ONLY navigation is the ready path. A fail-safe redirect here would
+    # ping-pong against /artists' not-ready gate and loop forever.
+    assert page.count("window.location.replace") == 1
+    assert "slow-note" in page
+
+
+def test_clear_stale_syncing_clears_flag_left_by_a_dead_process(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    db_module.init_db(conn)
+    uid = db_module.get_or_create_user(conn, "UC_stale", "{}", "2026-07-15T00:00:00")
+    db_module.set_user_syncing(conn, uid, True)
+    conn.commit()
+    conn.close()
+
+    # A freshly started process has no sync in flight, so any flag it finds is stale.
+    main._clear_stale_syncing()
+
+    conn = db_module.get_connection(db_path)
+    assert db_module.is_sync_ready(conn, uid) is True
+    conn.close()
+
+
 def test_base_styles_includes_landing_and_equalizer():
     assert "@keyframes eqBounce" in main.BASE_STYLES
     assert ".wordmark" in main.BASE_STYLES

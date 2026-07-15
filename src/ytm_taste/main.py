@@ -3,6 +3,7 @@ import base64
 import html
 import os
 import urllib.parse
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import requests
@@ -21,12 +22,34 @@ load_dotenv()
 # this is set — the standard, documented approach for local OAuth development.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
-app = FastAPI(title="ytm-taste")
-app.add_middleware(SessionMiddleware, secret_key=os.environ["SECRET_KEY"])
+DB_PATH = "data/ytm_taste.db"
 
 REDIRECT_URI = "http://127.0.0.1:8000/auth/callback"
 
-DB_PATH = "data/ytm_taste.db"
+
+def _clear_stale_syncing() -> None:
+    """A background sync dies with its process, but its users.syncing flag
+    survives in the DB. Left set, it would gate /artists forever and bounce the
+    user between the loader and the gate. Nothing can be syncing in a process
+    that has only just started, so clear the flags on the way up."""
+    try:
+        conn = db.get_connection(DB_PATH)
+        db.init_db(conn)
+        db.clear_all_syncing(conn)
+        conn.commit()
+        conn.close()
+    except Exception as exc:  # never block startup on this
+        print(f"Could not clear stale syncing flags (skipped): {exc}")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    _clear_stale_syncing()
+    yield
+
+
+app = FastAPI(title="ytm-taste", lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=os.environ["SECRET_KEY"])
 
 BASE_STYLES = """
 :root{--bg:#0c0a14;--surface:#171130;--surface-2:#1e1740;--primary:#7c3aed;
@@ -252,11 +275,18 @@ def render_loading_page(next_target: str) -> str:
         + "</div>"
     )
     target = html.escape(next_target)
+    # Navigate ONLY when ready. Redirecting on a timeout would bounce off
+    # /artists' not-ready gate straight back here, looping forever; instead keep
+    # polling (more slowly) and say so.
     script = (
-        "<script>(function(){var t=" + repr(next_target) + ";var n=0;function c(){n++;"
-        "fetch('/status').then(function(r){return r.json();}).then(function(d){"
-        "if(d&&d.ready){window.location.replace(t);}else if(n<40){setTimeout(c,1500);}"
-        "else{window.location.replace(t);}}).catch(function(){if(n<40){setTimeout(c,1500);}});}"
+        "<script>(function(){var t=" + repr(next_target) + ";var n=0;"
+        "function wait(){return n<40?1500:5000;}"
+        "function note(){if(n===40){var s=document.getElementById('slow-note');"
+        "if(s){s.hidden=false;}}}"
+        "function c(){n++;fetch('/status').then(function(r){return r.json();})"
+        ".then(function(d){if(d&&d.ready){window.location.replace(t);return;}"
+        "note();setTimeout(c,wait());})"
+        ".catch(function(){note();setTimeout(c,wait());});}"
         "c();})();</script>"
     )
     body = (
@@ -266,6 +296,8 @@ def render_loading_page(next_target: str) -> str:
         '<p class="lead">Tuning in to your library&hellip;</p>'
         '<p class="lead-sub">Reading your likes and playlists. This takes a few seconds.</p>'
         f"{eq}"
+        '<p class="lead-sub slow-note" id="slow-note" hidden>Still working &mdash; '
+        "this is taking longer than usual.</p>"
         f"{script}"
         "</div>"
     )

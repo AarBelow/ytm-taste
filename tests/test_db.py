@@ -379,6 +379,18 @@ def test_sync_ready_toggles_with_syncing_flag():
     assert db.is_sync_ready(conn, uid) is True
 
 
+def test_clear_all_syncing_resets_every_user():
+    conn = make_conn()
+    a = db.get_or_create_user(conn, "UC_a", "{}", "2026-07-15T00:00:00")
+    b = db.get_or_create_user(conn, "UC_b", "{}", "2026-07-15T00:00:00")
+    db.set_user_syncing(conn, a, True)
+    db.set_user_syncing(conn, b, True)
+    assert db.is_sync_ready(conn, a) is False
+    db.clear_all_syncing(conn)
+    assert db.is_sync_ready(conn, a) is True
+    assert db.is_sync_ready(conn, b) is True
+
+
 def test_init_db_adds_syncing_to_legacy_users():
     conn = sqlite3.connect(":memory:")
     conn.execute(
