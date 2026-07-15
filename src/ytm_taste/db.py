@@ -77,6 +77,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             listeners INTEGER,
             album_art_url TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS resolved_songs (
+            video_id TEXT PRIMARY KEY,
+            artist TEXT,
+            track TEXT,
+            is_cover INTEGER NOT NULL DEFAULT 0,
+            ok INTEGER NOT NULL
+        );
         """
     )
     cols = [r[1] for r in conn.execute("PRAGMA table_info(artist_details)").fetchall()]
@@ -336,3 +344,42 @@ def clear_all_syncing(conn) -> None:
 def is_sync_ready(conn, user_id) -> bool:
     row = conn.execute("SELECT syncing FROM users WHERE id = ?", (user_id,)).fetchone()
     return bool(row) and row[0] == 0
+
+
+def upsert_resolved_song(conn, video_id, artist, track, is_cover, ok) -> None:
+    conn.execute(
+        "INSERT INTO resolved_songs (video_id, artist, track, is_cover, ok) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET "
+        "artist=excluded.artist, track=excluded.track, "
+        "is_cover=excluded.is_cover, ok=excluded.ok",
+        (video_id, artist, track, 1 if is_cover else 0, 1 if ok else 0),
+    )
+
+
+def get_unresolved_songs(conn, user_id) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT video_id, channel_title, title FROM liked_videos
+        WHERE user_id = ?
+              AND (channel_title IS NULL OR channel_title NOT LIKE '% - Topic')
+        UNION
+        SELECT pi.video_id, pi.channel_title, pi.title
+        FROM playlist_items pi JOIN playlists p ON p.id = pi.playlist_row_id
+        WHERE p.user_id = ? AND pi.category_id = '10'
+              AND (pi.channel_title IS NULL OR pi.channel_title NOT LIKE '% - Topic')
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    done = {r[0] for r in conn.execute(
+        "SELECT video_id FROM resolved_songs"
+    ).fetchall()}
+    out: list[dict] = []
+    seen = set()
+    for video_id, channel_title, title in rows:
+        if video_id in done or video_id in seen:
+            continue
+        seen.add(video_id)
+        out.append(
+            {"video_id": video_id, "channel_title": channel_title, "title": title}
+        )
+    return out

@@ -406,3 +406,46 @@ def test_init_db_adds_syncing_to_legacy_users():
     assert "syncing" in cols
     uid = conn.execute("SELECT id FROM users").fetchone()[0]
     assert db.is_sync_ready(conn, uid) is True
+
+
+def test_resolved_songs_round_trip_including_negative_cache():
+    conn = make_conn()
+    db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True)
+    db.upsert_resolved_song(conn, "v2", None, None, False, False)  # tried and failed
+    rows = dict(
+        (r[0], (r[1], r[2], r[3], r[4]))
+        for r in conn.execute(
+            "SELECT video_id, artist, track, is_cover, ok FROM resolved_songs"
+        ).fetchall()
+    )
+    assert rows["v1"] == ("android 52", "romance", 0, 1)
+    assert rows["v2"] == (None, None, 0, 0)
+
+
+def test_get_unresolved_songs_skips_topic_and_already_resolved():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_u", "{}", "2026-07-15T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        uid,
+        [
+            {"video_id": "v1", "title": "android 52 - romance", "channel_title": "Ethan"},
+            {"video_id": "v2", "title": "Song", "channel_title": "Artist - Topic"},
+            {"video_id": "v3", "title": "Already Done", "channel_title": "Someone"},
+        ],
+    )
+    db.upsert_resolved_song(conn, "v3", "A", "T", False, True)
+    got = db.get_unresolved_songs(conn, uid)
+    assert [s["video_id"] for s in got] == ["v1"]
+    assert got[0]["channel_title"] == "Ethan"
+    assert got[0]["title"] == "android 52 - romance"
+
+
+def test_get_unresolved_songs_includes_negative_cached_only_once():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_u", "{}", "2026-07-15T00:00:00")
+    db.replace_liked_videos(
+        conn, uid, [{"video_id": "v1", "title": "junk", "channel_title": "Ch"}]
+    )
+    db.upsert_resolved_song(conn, "v1", None, None, False, False)
+    assert db.get_unresolved_songs(conn, uid) == []  # negative cache prevents retry
