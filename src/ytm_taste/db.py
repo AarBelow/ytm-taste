@@ -204,23 +204,51 @@ def normalize_artist(name: str) -> str:
     return name
 
 
+def _resolved_for_user(conn, user_id) -> list[tuple[str, str, str, int]]:
+    """(video_id, artist, track, is_cover) for this user's successfully resolved songs."""
+    return conn.execute(
+        """
+        SELECT rs.video_id, rs.artist, rs.track, rs.is_cover FROM resolved_songs rs
+        WHERE rs.ok = 1 AND rs.video_id IN (
+            SELECT video_id FROM liked_videos WHERE user_id = ?
+            UNION
+            SELECT pi.video_id FROM playlist_items pi
+            JOIN playlists p ON p.id = pi.playlist_row_id
+            WHERE p.user_id = ? AND pi.category_id = '10'
+        )
+        """,
+        (user_id, user_id),
+    ).fetchall()
+
+
 def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, int]]:
     rows = conn.execute(
         """
-        SELECT channel_title FROM liked_videos WHERE user_id = ?
+        SELECT video_id, channel_title FROM liked_videos WHERE user_id = ?
         UNION ALL
-        SELECT pi.channel_title
+        SELECT pi.video_id, pi.channel_title
         FROM playlist_items pi
         JOIN playlists p ON p.id = pi.playlist_row_id
         WHERE p.user_id = ? AND pi.category_id = '10'
         """,
         (user_id, user_id),
     ).fetchall()
+    resolved = {
+        vid: (artist, is_cover)
+        for vid, artist, _track, is_cover in _resolved_for_user(conn, user_id)
+    }
     counts: Counter = Counter()
-    for (channel_title,) in rows:
-        if channel_title is None:
+    for video_id, channel_title in rows:
+        if channel_title and channel_title.endswith(" - Topic"):
+            counts[normalize_artist(channel_title)] += 1
             continue
-        counts[normalize_artist(channel_title)] += 1
+        entry = resolved.get(video_id)
+        if entry is None:
+            continue  # unverified: no credit
+        artist, is_cover = entry
+        if is_cover or not artist:
+            continue  # covers seed but never get credit
+        counts[artist] += 1
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
@@ -238,7 +266,11 @@ def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[s
         """,
         (user_id, user_id),
     ).fetchall()
-    return [(normalize_artist(channel), title) for channel, title in rows]
+    seeds = [(normalize_artist(channel), title) for channel, title in rows]
+    for _vid, artist, track, _is_cover in _resolved_for_user(conn, user_id):
+        if artist and track:
+            seeds.append((artist, track))
+    return seeds
 
 
 def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str, str]]:
@@ -258,6 +290,9 @@ def get_owned_song_keys(conn: sqlite3.Connection, user_id: int) -> set[tuple[str
         if channel is None:
             continue
         keys.add((normalize_artist(channel).lower().strip(), title.lower().strip()))
+    for _vid, artist, track, _is_cover in _resolved_for_user(conn, user_id):
+        if artist and track:
+            keys.add((artist.lower().strip(), track.lower().strip()))
     return keys
 
 

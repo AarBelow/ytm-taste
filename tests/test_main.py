@@ -294,7 +294,7 @@ def test_root_shows_top_artists_when_logged_in(monkeypatch, tmp_path):
         [
             {"video_id": "v1", "title": "s1", "channel_title": "Radiohead - Topic"},
             {"video_id": "v2", "title": "s2", "channel_title": "Radiohead - Topic"},
-            {"video_id": "v3", "title": "s3", "channel_title": "Alt-J"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Alt-J - Topic"},
         ],
     )
     conn.commit()
@@ -319,7 +319,7 @@ def test_root_page_reflects_combined_liked_and_playlist_tally(monkeypatch, tmp_p
     user_id = conn.execute("SELECT id FROM users").fetchone()[0]
     # "Both": 1 liked + 1 playlist = 2; "PlaylistOnly": 1 playlist = 1
     db_module.replace_liked_videos(
-        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Both"}]
+        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Both - Topic"}]
     )
     db_module.replace_playlists(
         conn,
@@ -329,9 +329,9 @@ def test_root_page_reflects_combined_liked_and_playlist_tally(monkeypatch, tmp_p
                 "playlist_id": "PL1",
                 "title": "Mix",
                 "items": [
-                    {"video_id": "v2", "title": "s2", "channel_title": "Both",
+                    {"video_id": "v2", "title": "s2", "channel_title": "Both - Topic",
                      "category_id": "10"},
-                    {"video_id": "v3", "title": "s3", "channel_title": "PlaylistOnly",
+                    {"video_id": "v3", "title": "s3", "channel_title": "PlaylistOnly - Topic",
                      "category_id": "10"},
                 ],
             }
@@ -439,7 +439,9 @@ def test_home_shows_at_most_five_artists(monkeypatch, tmp_path):
     liked = []
     for n, count in [(6, 6), (5, 5), (4, 4), (3, 3), (2, 2), (1, 1)]:
         for i in range(count):
-            liked.append({"video_id": f"v{n}_{i}", "title": "s", "channel_title": f"Artist{n}"})
+            liked.append(
+                {"video_id": f"v{n}_{i}", "title": "s", "channel_title": f"Artist{n} - Topic"}
+            )
     db_module.replace_liked_videos(conn, user_id, liked)
     conn.commit()
     conn.close()
@@ -464,7 +466,7 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     conn = db_module.get_connection(db_path)
     user_id = conn.execute("SELECT id FROM users").fetchone()[0]
     db_module.replace_liked_videos(
-        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha"}]
+        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha - Topic"}]
     )
     db_module.upsert_artist_details(
         conn, "Alpha", "http://av/a.jpg", "indie", "An artist bio.", 12345, "http://alb/a.jpg"
@@ -493,7 +495,14 @@ def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
     db_module.replace_liked_videos(
         conn,
         user_id,
-        [{"video_id": "v1", "title": "s", "channel_title": "Alpha", "channel_id": "UC_alpha"}],
+        [
+            {
+                "video_id": "v1",
+                "title": "s",
+                "channel_title": "Alpha - Topic",
+                "channel_id": "UC_alpha",
+            }
+        ],
     )
     db_module.upsert_artist_details(conn, "Alpha", None, None, None, None)
     conn.commit()
@@ -515,9 +524,9 @@ def test_home_renders_hero_and_ranked_list(monkeypatch, tmp_path):
         conn,
         user_id,
         [
-            {"video_id": "v1", "title": "s1", "channel_title": "Alpha"},
-            {"video_id": "v2", "title": "s2", "channel_title": "Alpha"},
-            {"video_id": "v3", "title": "s3", "channel_title": "Beta"},
+            {"video_id": "v1", "title": "s1", "channel_title": "Alpha - Topic"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Alpha - Topic"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Beta - Topic"},
         ],
     )
     conn.commit()
@@ -616,7 +625,7 @@ def test_home_no_channel_link_when_channel_id_missing(monkeypatch, tmp_path):
     conn = db_module.get_connection(db_path)
     user_id = conn.execute("SELECT id FROM users").fetchone()[0]
     db_module.replace_liked_videos(
-        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha"}]
+        conn, user_id, [{"video_id": "v1", "title": "s", "channel_title": "Alpha - Topic"}]
     )
     conn.commit()
     conn.close()

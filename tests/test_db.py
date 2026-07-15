@@ -136,11 +136,11 @@ def test_get_top_artists_orders_by_count_desc_then_title():
         conn,
         user_id,
         [
-            {"video_id": "v1", "title": "s1", "channel_title": "Beta"},
-            {"video_id": "v2", "title": "s2", "channel_title": "Alpha"},
-            {"video_id": "v3", "title": "s3", "channel_title": "Alpha"},
-            {"video_id": "v4", "title": "s4", "channel_title": "Gamma"},
-            {"video_id": "v5", "title": "s5", "channel_title": "Gamma"},
+            {"video_id": "v1", "title": "s1", "channel_title": "Beta - Topic"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Alpha - Topic"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Alpha - Topic"},
+            {"video_id": "v4", "title": "s4", "channel_title": "Gamma - Topic"},
+            {"video_id": "v5", "title": "s5", "channel_title": "Gamma - Topic"},
         ],
     )
     # Alpha=2, Gamma=2, Beta=1 -> count desc, then title asc for the tie
@@ -152,14 +152,14 @@ def test_get_top_artists_only_counts_given_user():
     user1 = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     user2 = db.get_or_create_user(conn, "UC_user2", "{}", "2026-07-13T00:00:00")
     db.replace_liked_videos(
-        conn, user1, [{"video_id": "v1", "title": "s1", "channel_title": "Alpha"}]
+        conn, user1, [{"video_id": "v1", "title": "s1", "channel_title": "Alpha - Topic"}]
     )
     db.replace_liked_videos(
         conn,
         user2,
         [
-            {"video_id": "v2", "title": "s2", "channel_title": "Alpha"},
-            {"video_id": "v3", "title": "s3", "channel_title": "Alpha"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Alpha - Topic"},
+            {"video_id": "v3", "title": "s3", "channel_title": "Alpha - Topic"},
         ],
     )
     assert db.get_top_artists(conn, user1) == [("Alpha", 1)]
@@ -220,7 +220,7 @@ def test_get_top_artists_combines_liked_and_music_playlist_and_normalizes():
         user_id,
         [
             {"video_id": "v1", "title": "s1", "channel_title": "AZALI - Topic"},
-            {"video_id": "v2", "title": "s2", "channel_title": "Beta"},
+            {"video_id": "v2", "title": "s2", "channel_title": "Beta - Topic"},
         ],
     )
     _add_music_playlist(
@@ -228,8 +228,8 @@ def test_get_top_artists_combines_liked_and_music_playlist_and_normalizes():
         user_id,
         "Mix",
         [
-            ("v3", "s3", "AZALI", "10"),
-            ("v4", "s4", "Beta", "10"),
+            ("v3", "s3", "AZALI - Topic", "10"),
+            ("v4", "s4", "Beta - Topic", "10"),
             ("v5", "s5", "Some Vlogger", "22"),
         ],
     )
@@ -240,13 +240,13 @@ def test_get_top_artists_counts_each_occurrence():
     conn = make_conn()
     user_id = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     db.replace_liked_videos(
-        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Gamma"}]
+        conn, user_id, [{"video_id": "v1", "title": "s1", "channel_title": "Gamma - Topic"}]
     )
     _add_music_playlist(
         conn,
         user_id,
         "Mix",
-        [("v2", "s2", "Gamma", "10"), ("v3", "s3", "Gamma", "10")],
+        [("v2", "s2", "Gamma - Topic", "10"), ("v3", "s3", "Gamma - Topic", "10")],
     )
     assert db.get_top_artists(conn, user_id) == [("Gamma", 3)]
 
@@ -255,8 +255,8 @@ def test_get_top_artists_playlist_songs_stay_per_user():
     conn = make_conn()
     user1 = db.get_or_create_user(conn, "UC_user1", "{}", "2026-07-13T00:00:00")
     user2 = db.get_or_create_user(conn, "UC_user2", "{}", "2026-07-13T00:00:00")
-    _add_music_playlist(conn, user1, "Mix1", [("v1", "s1", "Alpha", "10")])
-    _add_music_playlist(conn, user2, "Mix2", [("v2", "s2", "Alpha", "10")])
+    _add_music_playlist(conn, user1, "Mix1", [("v1", "s1", "Alpha - Topic", "10")])
+    _add_music_playlist(conn, user2, "Mix2", [("v2", "s2", "Alpha - Topic", "10")])
     assert db.get_top_artists(conn, user1) == [("Alpha", 1)]
 
 
@@ -449,3 +449,57 @@ def test_get_unresolved_songs_includes_negative_cached_only_once():
     )
     db.upsert_resolved_song(conn, "v1", None, None, False, False)
     assert db.get_unresolved_songs(conn, uid) == []  # negative cache prevents retry
+
+
+def _user_with_songs(conn, songs):
+    uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-15T00:00:00")
+    db.replace_liked_videos(conn, uid, songs)
+    return uid
+
+
+def test_top_artists_credits_resolved_artist_not_the_uploader():
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn, [{"video_id": "v1", "title": "android 52 - romance", "channel_title": "Ethan"}]
+    )
+    db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True)
+    assert db.get_top_artists(conn, uid) == [("android 52", 1)]
+
+
+def test_top_artists_excludes_covers_and_unverified():
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn,
+        [
+            {"video_id": "v1", "title": "Memories - Maroon 5 (cover)", "channel_title": "BC"},
+            {"video_id": "v2", "title": "junk", "channel_title": "Reuploader"},
+            {"video_id": "v3", "title": "Song", "channel_title": "Real - Topic"},
+        ],
+    )
+    db.upsert_resolved_song(conn, "v1", "Maroon 5", "Memories", True, True)  # cover
+    db.upsert_resolved_song(conn, "v2", None, None, False, False)  # unverified
+    assert db.get_top_artists(conn, uid) == [("Real", 1)]
+
+
+def test_clean_seed_songs_includes_resolved_songs_including_covers():
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn,
+        [
+            {"video_id": "v1", "title": "Memories - Maroon 5 (cover)", "channel_title": "BC"},
+            {"video_id": "v2", "title": "Song", "channel_title": "Real - Topic"},
+        ],
+    )
+    db.upsert_resolved_song(conn, "v1", "Maroon 5", "Memories", True, True)
+    seeds = db.get_clean_seed_songs(conn, uid)
+    assert ("Real", "Song") in seeds
+    assert ("Maroon 5", "Memories") in seeds  # covers still seed
+
+
+def test_owned_song_keys_include_resolved_names():
+    conn = make_conn()
+    uid = _user_with_songs(
+        conn, [{"video_id": "v1", "title": "android 52 - romance", "channel_title": "Ethan"}]
+    )
+    db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True)
+    assert ("android 52", "romance") in db.get_owned_song_keys(conn, uid)
