@@ -437,6 +437,102 @@ def test_run_sync_clears_syncing_flag_on_success(tmp_path):
     assert db.is_sync_ready(conn, user_id) is True
 
 
+def test_run_sync_resolves_non_topic_songs(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def liked(youtube):
+        return [
+            {
+                "video_id": "v1",
+                "title": "android 52 - romance",
+                "channel_title": "Ethan",
+                "channel_id": "UCe",
+            }
+        ]
+
+    def verify(api_key, artist, track):
+        if artist == "android 52":
+            return {"artist": "android 52", "track": "romance"}
+        return None
+
+    sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=liked,
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [],
+        fetch_song_meta_fn=lambda a, t: None,
+        fetch_channel_avatars_fn=lambda yt, ids: {},
+        fetch_artist_info_fn=lambda k, a: None,
+        fetch_artist_album_art_fn=lambda a: None,
+        verify_track_fn=verify,
+    )
+    conn = db.get_connection(db_path)
+    row = conn.execute(
+        "SELECT artist, track, ok FROM resolved_songs WHERE video_id = 'v1'"
+    ).fetchone()
+    assert row == ("android 52", "romance", 1)
+    assert db.get_top_artists(conn, user_id) == [("android 52", 1)]
+
+
+def test_run_sync_records_unresolvable_songs_as_negative_cache(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v9", "title": "junk #shorts", "channel_title": "Ch", "channel_id": "UCc"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [],
+        fetch_song_meta_fn=lambda a, t: None,
+        fetch_channel_avatars_fn=lambda yt, ids: {},
+        fetch_artist_info_fn=lambda k, a: None,
+        fetch_artist_album_art_fn=lambda a: None,
+        verify_track_fn=lambda k, a, t: None,
+    )
+    conn = db.get_connection(db_path)
+    assert conn.execute(
+        "SELECT ok FROM resolved_songs WHERE video_id = 'v9'"
+    ).fetchone() == (0,)
+
+
+def test_run_sync_survives_resolver_failure(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def boom(api_key, artist, track):
+        raise RuntimeError("lastfm down")
+
+    summary = sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v1", "title": "A - B", "channel_title": "Ch", "channel_id": "UCc"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [],
+        fetch_song_meta_fn=lambda a, t: None,
+        fetch_channel_avatars_fn=lambda yt, ids: {},
+        fetch_artist_info_fn=lambda k, a: None,
+        fetch_artist_album_art_fn=lambda a: None,
+        verify_track_fn=boom,
+    )
+    assert summary["liked_videos"] == 1  # YouTube data still committed
+
+
 def test_run_sync_clears_syncing_flag_on_core_failure(tmp_path):
     db_path = str(tmp_path / "test.db")
     user_id = make_user(db_path, "UC_user1")

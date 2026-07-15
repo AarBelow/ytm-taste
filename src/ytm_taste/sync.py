@@ -7,6 +7,7 @@ from ytm_taste import (
     itunes_client,
     lastfm_client,
     recommendations,
+    song_resolver,
     youtube_client,
 )
 
@@ -26,6 +27,7 @@ def run_sync(
     fetch_channel_avatars_fn=youtube_client.fetch_channel_avatars,
     fetch_artist_info_fn=lastfm_client.fetch_artist_info,
     fetch_artist_album_art_fn=itunes_client.fetch_artist_album_art,
+    verify_track_fn=lastfm_client.verify_track,
 ) -> dict:
     start = time.monotonic()
     conn = db.get_connection(db_path)
@@ -67,6 +69,33 @@ def run_sync(
         except Exception:
             conn.rollback()
             raise
+
+        if lastfm_api_key:
+            try:
+                unresolved = db.get_unresolved_songs(conn, user_id)
+                results = concurrency.run_concurrently(
+                    lambda s: (
+                        s,
+                        song_resolver.resolve(
+                            s["channel_title"],
+                            s["title"],
+                            lambda a, t: verify_track_fn(lastfm_api_key, a, t),
+                        ),
+                    ),
+                    unresolved,
+                )
+                for song, found in results:
+                    if found:
+                        db.upsert_resolved_song(
+                            conn, song["video_id"], found["artist"], found["track"],
+                            found["is_cover"], True,
+                        )
+                    else:
+                        db.upsert_resolved_song(conn, song["video_id"], None, None, False, False)
+                conn.commit()
+            except Exception as exc:  # best-effort: never affects committed YouTube data
+                conn.rollback()
+                print(f"Song resolution failed (skipped): {exc}")
 
         recommendation_count = 0
         if lastfm_api_key:
