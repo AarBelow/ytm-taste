@@ -310,6 +310,24 @@ def _safe_next(value) -> str:
     return value if value in _ALLOWED_NEXT else "/artists"
 
 
+def _session_user(request: Request, conn) -> int | None:
+    """The logged-in user, or None if the cookie names someone who no longer exists.
+
+    A browser cookie outlives the database. Without this check a wipe, restore or bad
+    migration bricks every logged-in visitor: the app sees the cookie and skips the
+    landing page, then asks "is their sync finished?" about a user who isn't there.
+    That reads as "not ready" -- identical to a sync in progress -- so they're parked
+    on the loader forever, unable to reach the landing page to sign up again.
+    """
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return None
+    if not db.user_exists(conn, user_id):
+        request.session.pop("user_id", None)
+        return None
+    return user_id
+
+
 def _topbar(refresh: bool = False, next_path: str = "/artists") -> str:
     # next_path brings the user back to the page they refreshed from.
     action = (
@@ -739,15 +757,16 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
 
 @app.get("/")
 def read_root(request: Request):
-    user_id = request.session.get("user_id")
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    user_id = _session_user(request, conn)
     if user_id is None:
+        conn.close()
         return HTMLResponse(render_landing_page(logged_in=False))
     # A pending target is a one-shot intent (from login, or a gated page bouncing
     # here mid-sync). Consume it; without one, "/" is just the landing page, which
     # is what the Home button wants.
     explicit = request.query_params.get("next") or request.session.pop("post_sync_next", None)
-    conn = db.get_connection(DB_PATH)
-    db.init_db(conn)
     ready = db.is_sync_ready(conn, user_id)
     conn.close()
     if not ready:
@@ -759,11 +778,12 @@ def read_root(request: Request):
 
 @app.get("/artists")
 def artists_page(request: Request):
-    user_id = request.session.get("user_id")
-    if user_id is None:
-        return RedirectResponse("/login?next=/artists")
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    user_id = _session_user(request, conn)
+    if user_id is None:
+        conn.close()
+        return RedirectResponse("/login?next=/artists")
     if not db.is_sync_ready(conn, user_id):
         conn.close()
         return RedirectResponse("/?next=/artists")
@@ -793,11 +813,12 @@ def refresh(request: Request, background_tasks: BackgroundTasks):
     never sees Google's consent screen again. POST, so a stray reload or a link
     prefetcher can't kick off a sync by accident."""
     back_to = _safe_next(request.query_params.get("next"))
-    user_id = request.session.get("user_id")
-    if user_id is None:
-        return RedirectResponse(f"/login?next={back_to}", status_code=303)
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    user_id = _session_user(request, conn)
+    if user_id is None:
+        conn.close()
+        return RedirectResponse(f"/login?next={back_to}", status_code=303)
     try:
         credentials = google_oauth.credentials_from_json(db.get_user_oauth_token(conn, user_id))
     except Exception as exc:
@@ -826,12 +847,13 @@ async def fine_tune(request: Request, background_tasks: BackgroundTasks):
     JSON rather than a form post: FastAPI's Form() needs python-multipart, and the
     wizard already requires JavaScript for its step transitions.
     """
-    user_id = request.session.get("user_id")
-    if user_id is None:
-        return Response(status_code=401)
-    payload = await request.json()
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    user_id = _session_user(request, conn)
+    if user_id is None:
+        conn.close()
+        return Response(status_code=401)
+    payload = await request.json()
     # Clamp everything: only the user's own playlists, only known option values.
     own = {p["playlist_id"] for p in db.get_seedable_playlists(conn, user_id)}
     asked = payload.get("playlists") or []
@@ -856,11 +878,12 @@ async def fine_tune(request: Request, background_tasks: BackgroundTasks):
 
 @app.get("/status")
 def status(request: Request):
-    user_id = request.session.get("user_id")
-    if user_id is None:
-        return {"ready": False}
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    user_id = _session_user(request, conn)
+    if user_id is None:
+        conn.close()
+        return {"ready": False}
     ready = db.is_sync_ready(conn, user_id)
     conn.close()
     return {"ready": ready}
@@ -868,11 +891,12 @@ def status(request: Request):
 
 @app.get("/recommendations")
 def recommendations_page(request: Request):
-    user_id = request.session.get("user_id")
-    if user_id is None:
-        return RedirectResponse("/login?next=/recommendations")
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
+    user_id = _session_user(request, conn)
+    if user_id is None:
+        conn.close()
+        return RedirectResponse("/login?next=/recommendations")
     if not db.is_sync_ready(conn, user_id):
         conn.close()
         return RedirectResponse("/?next=/recommendations")

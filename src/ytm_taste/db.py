@@ -522,6 +522,10 @@ def clear_all_syncing(conn) -> None:
     conn.execute("UPDATE users SET syncing = 0")
 
 
+def user_exists(conn, user_id) -> bool:
+    return conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
+
+
 def is_sync_ready(conn, user_id) -> bool:
     row = conn.execute("SELECT syncing FROM users WHERE id = ?", (user_id,)).fetchone()
     return bool(row) and row[0] == 0

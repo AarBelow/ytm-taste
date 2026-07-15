@@ -862,6 +862,50 @@ def test_missing_cover_shows_a_styled_placeholder_not_an_empty_box():
     assert ".cover-ph{" in main.BASE_STYLES
 
 
+def _login_then_wipe_the_user(client, monkeypatch, tmp_path):
+    """Log in, then delete the user out from under the live cookie -- exactly what a
+    database wipe, restore or bad migration does to every logged-in browser."""
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    conn.execute("DELETE FROM users")
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def test_root_shows_landing_when_the_cookie_names_a_deleted_user(monkeypatch, tmp_path):
+    # Without this, "user doesn't exist" reads as "sync not finished" and the visitor
+    # is parked on the loader forever, unable to reach the landing page to sign up.
+    client = TestClient(main.app, follow_redirects=False)
+    _login_then_wipe_the_user(client, monkeypatch, tmp_path)
+    body = client.get("/").text
+    assert "Connect YouTube" in body
+    assert "Tuning in" not in body
+
+
+def test_a_deleted_user_is_logged_out_not_left_holding_the_cookie(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _login_then_wipe_the_user(client, monkeypatch, tmp_path)
+    client.get("/")  # should bin the stale cookie
+    assert "Connect YouTube" in client.get("/").text  # and stay logged out
+
+
+def test_artists_sends_a_deleted_user_to_login(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _login_then_wipe_the_user(client, monkeypatch, tmp_path)
+    r = client.get("/artists")
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/login?next=/artists"
+
+
+def test_status_says_not_ready_for_a_deleted_user_without_looping(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _login_then_wipe_the_user(client, monkeypatch, tmp_path)
+    assert client.get("/status").json() == {"ready": False}
+
+
 def test_hidden_overlay_and_menu_actually_stay_hidden():
     # `display:flex` on these beats the browser's own [hidden]{display:none} at equal
     # specificity, so without an explicit rule the wizard renders OPEN on page load and
