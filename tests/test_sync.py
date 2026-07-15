@@ -671,3 +671,54 @@ def test_run_sync_clears_syncing_flag_on_core_failure(tmp_path):
         )
     conn = db.get_connection(db_path)
     assert db.is_sync_ready(conn, user_id) is True  # finally cleared the flag
+
+
+def test_run_sync_remembers_seeds_that_return_nothing(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+
+    def liked(youtube):
+        return [
+            {"video_id": "v1", "title": "loud", "channel_title": "A - Topic", "channel_id": "UCa"},
+            {"video_id": "v2", "title": "quiet", "channel_title": "A - Topic", "channel_id": "UCa"},
+        ]
+
+    def similar(key, artist, track):
+        # "quiet" has no similar tracks on Last.fm -- it votes for nothing
+        return [] if track == "quiet" else [{"artist": "X", "track": "Y", "match": 0.5}]
+
+    sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=liked,
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=similar,
+        fetch_song_meta_fn=lambda a, t: None,
+        fetch_channel_avatars_fn=lambda yt, ids: {},
+        fetch_artist_info_fn=lambda k, a: None,
+        fetch_artist_album_art_fn=lambda a: None,
+        verify_track_fn=lambda k, a, t: None,
+    )
+    conn = db.get_connection(db_path)
+    silent = db.get_silent_seeds(conn)
+    assert ("a", "quiet") in silent
+    assert ("a", "loud") not in silent
+    # and it's excluded from future seeding
+    assert db.get_clean_seed_songs(conn, user_id) == [("A", "loud")]
+    conn.close()
+
+
+def test_rerank_remembers_seeds_that_return_nothing(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    user_id = _seeded_user(db_path)
+    sync.rerank(
+        db_path, user_id, lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [],  # everything is silent
+        fetch_song_meta_fn=lambda a, t: None,
+    )
+    conn = db.get_connection(db_path)
+    assert len(db.get_silent_seeds(conn)) > 0
+    conn.close()

@@ -721,3 +721,32 @@ def test_owned_song_keys_include_resolved_names():
     )
     db.upsert_resolved_song(conn, "v1", "android 52", "romance", False, True)
     assert ("android 52", "romance") in db.get_owned_song_keys(conn, uid)
+
+
+def test_silent_seeds_round_trip_and_case_insensitive():
+    conn = make_conn()
+    db.mark_silent_seeds(conn, [("Kaz Moon", "Mantra"), ("Joe Hisaishi", "Merry-Go-Round")])
+    silent = db.get_silent_seeds(conn)
+    assert ("kaz moon", "mantra") in silent  # stored case-folded
+    assert ("joe hisaishi", "merry-go-round") in silent
+    db.mark_silent_seeds(conn, [("Kaz Moon", "Mantra")])  # re-marking must not blow up
+    assert len(db.get_silent_seeds(conn)) == 2
+
+
+def test_clean_seed_songs_skips_seeds_known_to_return_nothing():
+    # A seed Last.fm has no similar tracks for casts zero votes: it burns a slot and
+    # teaches nothing. Measured: 46 of 100 seeds were silent.
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-16T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        uid,
+        [
+            {"video_id": "v1", "title": "loud song", "channel_title": "A - Topic"},
+            {"video_id": "v2", "title": "silent song", "channel_title": "A - Topic"},
+        ],
+    )
+    assert len(db.get_clean_seed_songs(conn, uid)) == 2
+    db.mark_silent_seeds(conn, [("A", "silent song")])
+    seeds = db.get_clean_seed_songs(conn, uid)
+    assert seeds == [("A", "loud song")]

@@ -12,6 +12,17 @@ from ytm_taste import (
 )
 
 
+def _remember_silent(conn, seeds, similar_by_seed) -> None:
+    """Record seeds Last.fm had no similar tracks for, so they stop taking slots.
+
+    Measured on the real library: 46 of 100 seeds returned nothing, including 16 of
+    the 27 the quota handed to the top artist. Those slots vote for nothing.
+    """
+    silent = [seed for seed, similar in zip(seeds, similar_by_seed) if not similar]
+    if silent:
+        db.mark_silent_seeds(conn, silent)
+
+
 def run_sync(
     db_path: str,
     user_id: int,
@@ -110,6 +121,7 @@ def run_sync(
                     lambda s: fetch_similar_fn(lastfm_api_key, s[0], s[1]), seeds,
                     max_workers=10,
                 )
+                _remember_silent(conn, seeds, similar_by_seed)
                 owned = db.get_owned_song_keys(conn, user_id)
                 recs = recommendations.rank(similar_by_seed, owned)
                 metas = concurrency.run_concurrently(
@@ -208,6 +220,7 @@ def rerank(
                     lambda s: fetch_similar_fn(lastfm_api_key, s[0], s[1]), seeds,
                     max_workers=10,
                 )
+                _remember_silent(conn, seeds, similar_by_seed)
                 recs = recommendations.rank(
                     similar_by_seed,
                     db.get_owned_song_keys(conn, user_id),
