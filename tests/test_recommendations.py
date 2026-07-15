@@ -113,6 +113,54 @@ def test_rank_sums_match_scores_and_excludes_owned():
     assert all(artist != "Owned Band" for artist, _track, _score in result)
 
 
+def test_rank_defaults_reproduce_todays_behaviour():
+    similar = [
+        [{"artist": "A", "track": "x", "match": 0.5}],
+        [{"artist": "A", "track": "x", "match": 0.5}],
+        [{"artist": "B", "track": "y", "match": 0.9}],
+    ]
+    got = recommendations.rank(similar, owned_keys=set())
+    assert got[0] == ("A", "x", 1.0)  # summed, breadth beats depth
+    assert got[1] == ("B", "y", 0.9)
+
+
+def test_rank_adventurous_mode_uses_the_strongest_single_match_not_the_sum():
+    # The J Dilla case: one seed adores B (0.9); three seeds shrug at A (0.5 each).
+    similar = [
+        [{"artist": "A", "track": "x", "match": 0.5}],
+        [{"artist": "A", "track": "x", "match": 0.5}],
+        [{"artist": "A", "track": "x", "match": 0.5}],
+        [{"artist": "B", "track": "y", "match": 0.9}],
+    ]
+    safe = recommendations.rank(similar, owned_keys=set(), mode="safe")
+    assert safe[0][0] == "A"  # 1.5 summed beats 0.9
+    bold = recommendations.rank(similar, owned_keys=set(), mode="adventurous")
+    assert bold[0] == ("B", "y", 0.9)  # strongest single match wins
+    assert bold[1] == ("A", "x", 0.5)
+
+
+def test_rank_discovery_new_demotes_artists_you_already_have():
+    similar = [
+        [{"artist": "Known", "track": "x", "match": 1.0}],
+        [{"artist": "Known", "track": "x", "match": 1.0}],
+        [{"artist": "Fresh", "track": "y", "match": 0.5}],
+    ]
+    known = {"known"}
+    love = recommendations.rank(similar, set(), known_artists=known, discovery="love")
+    assert love[0][0] == "Known"  # 2.0 vs 0.5 -- unchanged from today
+    new = recommendations.rank(similar, set(), known_artists=known, discovery="new")
+    assert new[0][0] == "Fresh"  # 2.0 * 0.1 = 0.2, beaten by 0.5
+    assert new[1][0] == "Known"  # still present, just demoted
+
+
+def test_rank_discovery_matches_known_artists_case_insensitively():
+    similar = [[{"artist": "kaz moon", "track": "x", "match": 1.0}],
+               [{"artist": "Fresh", "track": "y", "match": 0.5}]]
+    got = recommendations.rank(similar, set(), known_artists={"Kaz Moon".casefold()},
+                               discovery="new")
+    assert got[0][0] == "Fresh"
+
+
 def test_rank_keeps_fifty_recommendations_by_default():
     # 10 pages of 5, so Refresh shows new songs instead of looping after 5 clicks.
     # 50 is where this library's scores flatten out: rank 25 scores 1.04, rank 50
