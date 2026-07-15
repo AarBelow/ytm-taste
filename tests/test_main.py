@@ -682,6 +682,85 @@ def test_pages_use_docs_style_prev_next_nav(monkeypatch, tmp_path):
     assert "back to your top artists" not in recs
 
 
+class FakeStoredCreds:
+    def to_json(self):
+        return '{"token": "refreshed"}'
+
+
+def _fake_refresh_deps(monkeypatch):
+    """Stand in for the Google token exchange + YouTube client on /refresh."""
+    monkeypatch.setattr(google_oauth, "credentials_from_json", lambda raw: FakeStoredCreds())
+    monkeypatch.setattr(youtube_client, "build_youtube_client", lambda creds: object())
+
+
+def test_artists_page_has_a_refresh_button(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    body = client.get("/artists").text
+    assert 'action="/refresh"' in body
+    assert "Refresh my data" in body
+
+
+def test_refresh_requires_login():
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.post("/refresh")
+    assert r.status_code in (302, 303, 307)
+    assert r.headers["location"] == "/login?next=/artists"
+
+
+def test_refresh_starts_a_sync_without_a_new_consent_screen(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    _fake_refresh_deps(monkeypatch)
+
+    calls = []
+    monkeypatch.setattr(
+        main.sync, "run_sync", lambda db_path_arg, user_id, youtube, **kw: calls.append(user_id)
+    )
+
+    r = client.post("/refresh")
+    assert r.status_code in (302, 303, 307)
+    assert r.headers["location"] == "/?next=/artists"  # lands on the loader
+    assert len(calls) == 1  # the sync actually ran
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    # the refreshed token is persisted back so it stays usable next time
+    assert db_module.get_user_oauth_token(conn, uid) == '{"token": "refreshed"}'
+    conn.close()
+
+
+def test_refresh_marks_user_as_syncing_so_the_loader_shows(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+    _fake_refresh_deps(monkeypatch)
+    # a sync that never finishes, so the syncing flag stays set for us to observe
+    monkeypatch.setattr(main.sync, "run_sync", lambda *a, **kw: None)
+
+    client.post("/refresh")
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    assert db_module.is_sync_ready(conn, uid) is False
+    conn.close()
+
+
+def test_refresh_falls_back_to_login_when_the_stored_token_is_dead(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+
+    def revoked(raw):
+        raise ValueError("token has been revoked")
+
+    monkeypatch.setattr(google_oauth, "credentials_from_json", revoked)
+    r = client.post("/refresh")
+    assert r.status_code in (302, 303, 307)
+    assert r.headers["location"] == "/login?next=/artists"
+
+
 def test_loading_page_only_navigates_when_ready():
     page = main.render_loading_page("/artists")
     # The ONLY navigation is the ready path. A fail-safe redirect here would

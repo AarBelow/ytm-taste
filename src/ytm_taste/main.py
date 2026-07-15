@@ -145,7 +145,15 @@ a:hover{text-decoration:underline}
 .pagenav-link.prev{margin-right:auto}
 .pagenav-link.next .pagenav-title::after{content:"\\2192";margin-left:.4rem}
 .pagenav-link.prev .pagenav-title::before{content:"\\2190";margin-right:.4rem}
-.topbar{display:flex;margin:0 0 1.5rem}
+.topbar{display:flex;align-items:center;gap:1rem;margin:0 0 1.5rem}
+.refresh-form{margin-left:auto}
+.refresh-data-btn{display:inline-flex;align-items:center;gap:.45rem;min-height:44px;
+  padding:.45rem 1.1rem;font-family:'Poppins',sans-serif;font-size:.85rem;font-weight:600;
+  color:var(--muted);background:var(--surface);border:1px solid var(--border);
+  border-radius:999px;cursor:pointer;transition:color .2s,border-color .2s,box-shadow .2s}
+.refresh-data-btn:hover{color:var(--fg);border-color:var(--primary-glow);
+  box-shadow:0 0 18px rgba(124,58,237,.35)}
+.refresh-data-btn:focus-visible{outline:2px solid var(--primary-glow);outline-offset:3px}
 .home-link{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1rem;
   font-family:'Righteous',cursive;font-size:.95rem;color:var(--primary-glow);
   background:var(--surface);border:1px solid var(--border);border-radius:999px;
@@ -258,8 +266,18 @@ def _safe_next(value) -> str:
     return value if value in _ALLOWED_NEXT else "/artists"
 
 
-def _topbar() -> str:
-    return '<header class="topbar"><a class="home-link" href="/">ytm-taste</a></header>'
+def _topbar(refresh: bool = False) -> str:
+    action = (
+        '<form class="refresh-form" method="post" action="/refresh">'
+        '<button class="refresh-data-btn" type="submit">'
+        '<span aria-hidden="true">&#8635;</span> Refresh my data</button></form>'
+        if refresh
+        else ""
+    )
+    return (
+        '<header class="topbar"><a class="home-link" href="/">ytm-taste</a>'
+        f"{action}</header>"
+    )
 
 
 def _pagenav(direction: str, href: str, title: str) -> str:
@@ -396,7 +414,7 @@ def artist_avatar(artist: str):
 def render_results_page(artists) -> str:
     if not artists:
         body = (
-            f"{_topbar()}<h1>Your Top Artists</h1>"
+            f"{_topbar(refresh=True)}<h1>Your Top Artists</h1>"
             '<p class="empty">No liked music synced yet — if you just logged in, '
             "give it a few seconds and refresh.</p>"
             f"{_pagenav('next', '/recommendations', 'Songs You Might Like')}"
@@ -407,7 +425,7 @@ def render_results_page(artists) -> str:
     ranked = "".join(_artist_card(a, hero=False) for a in artists[1:])
     ranked_block = f'<ul class="ranked">{ranked}</ul>' if ranked else ""
     body = (
-        f"{_topbar()}<h1>Your Top Artists</h1>"
+        f"{_topbar(refresh=True)}<h1>Your Top Artists</h1>"
         '<p class="sub">Your most-played artists across likes and playlists.</p>'
         f"{hero}{ranked_block}"
         f"{_pagenav('next', '/recommendations', 'Songs You Might Like')}"
@@ -584,6 +602,37 @@ def artists_page(request: Request):
         )
     conn.close()
     return HTMLResponse(render_results_page(artists))
+
+
+@app.post("/refresh")
+def refresh(request: Request, background_tasks: BackgroundTasks):
+    """Re-sync on demand, reusing the refresh token stored at login so the user
+    never sees Google's consent screen again. POST, so a stray reload or a link
+    prefetcher can't kick off a sync by accident."""
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return RedirectResponse("/login?next=/artists", status_code=303)
+    conn = db.get_connection(DB_PATH)
+    db.init_db(conn)
+    try:
+        credentials = google_oauth.credentials_from_json(db.get_user_oauth_token(conn, user_id))
+    except Exception as exc:
+        # Revoked/expired beyond repair: the only way back is a fresh consent.
+        conn.close()
+        print(f"Stored token unusable, sending user back to login: {exc}")
+        request.session.pop("user_id", None)
+        return RedirectResponse("/login?next=/artists", status_code=303)
+    # Persist the (possibly refreshed) token so the next refresh still works.
+    db.update_user_oauth_token(conn, user_id, credentials.to_json())
+    db.set_user_syncing(conn, user_id, True)
+    conn.commit()
+    conn.close()
+    youtube = youtube_client.build_youtube_client(credentials)
+    background_tasks.add_task(
+        sync.run_sync, DB_PATH, user_id, youtube,
+        lastfm_api_key=os.environ.get("LASTFM_API_KEY"),
+    )
+    return RedirectResponse("/?next=/artists", status_code=303)
 
 
 @app.get("/status")

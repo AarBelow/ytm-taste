@@ -1,6 +1,8 @@
 # tests/test_google_oauth.py
 import importlib
+import json
 import os
+from datetime import datetime, timedelta
 
 from ytm_taste import google_oauth
 
@@ -96,3 +98,39 @@ def test_importing_main_sets_oauthlib_insecure_transport_for_local_http_oauth(mo
     importlib.reload(main)
 
     assert os.environ.get("OAUTHLIB_INSECURE_TRANSPORT") == "1"
+
+
+def _stored_token(expiry):
+    # Shape of what credentials.to_json() saves at login. The refresh_token is
+    # the bit that lets us re-sync later without a consent screen.
+    return json.dumps(
+        {
+            "token": "an-access-token",
+            "refresh_token": "the-refresh-token",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": "cid",
+            "client_secret": "secret",
+            "scopes": google_oauth.SCOPES,
+            "expiry": expiry,
+        }
+    )
+
+
+def test_credentials_from_json_rebuilds_a_still_valid_token_without_refreshing():
+    hour_ahead = (datetime.utcnow() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    refreshed = []
+    creds = google_oauth.credentials_from_json(
+        _stored_token(hour_ahead), refresh_fn=lambda c: refreshed.append(True)
+    )
+    assert creds.refresh_token == "the-refresh-token"
+    assert creds.token == "an-access-token"
+    assert refreshed == []  # still valid -> no round-trip to Google
+
+
+def test_credentials_from_json_refreshes_an_expired_token():
+    refreshed = []
+    creds = google_oauth.credentials_from_json(
+        _stored_token("2020-01-01T00:00:00Z"), refresh_fn=lambda c: refreshed.append(True)
+    )
+    assert refreshed == [True]  # an hour-old access token gets refreshed before use
+    assert creds.refresh_token == "the-refresh-token"
