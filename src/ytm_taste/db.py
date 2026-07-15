@@ -1,6 +1,14 @@
 # src/ytm_taste/db.py
+import json
 import sqlite3
 from collections import Counter
+
+# Fine-tune preferences. "playlists" empty means "all my music".
+DEFAULT_PREFS = {"playlists": [], "discovery": "mix", "mode": "safe"}
+
+# A playlist needs at least this many nameable songs to be worth seeding from -- a
+# 3-song playlist would give 3 seeds and a threadbare set of recommendations.
+MIN_SEEDABLE_PLAYLIST = 8
 
 # Last.fm's catalogue comes from scrobbles, so a mis-split title like "05" or
 # "平行線" can still "exist" with a few hundred listeners. Seeds tolerate that (a
@@ -109,6 +117,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
     if "syncing" not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN syncing INTEGER NOT NULL DEFAULT 0")
+    if "prefs" not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
     conn.commit()
 
 
@@ -281,7 +291,26 @@ def get_top_artists(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, i
     return sorted(named, key=lambda kv: (-kv[1], kv[0]))
 
 
-def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[str, str]]:
+def get_clean_seed_songs(
+    conn: sqlite3.Connection, user_id: int, playlist_ids=None
+) -> list[tuple[str, str]]:
+    # When the user picks specific playlists they've chosen a context ("I miss her"),
+    # so liked songs are excluded -- mixing them back in would dilute the choice.
+    if playlist_ids:
+        marks = ",".join("?" for _ in playlist_ids)
+        rows = conn.execute(
+            f"""
+            SELECT pi.video_id, pi.channel_title, pi.title
+            FROM playlist_items pi
+            JOIN playlists p ON p.id = pi.playlist_row_id
+            WHERE p.user_id = ? AND pi.category_id = '10' AND p.playlist_id IN ({marks})
+            """,
+            (user_id, *playlist_ids),
+        ).fetchall()
+        rows = list(rows)
+        eligible = {video_id for video_id, _c, _t in rows}
+        return _seeds_from(conn, user_id, rows, eligible)
+
     liked = conn.execute(
         "SELECT video_id, channel_title, title FROM liked_videos "
         "WHERE user_id = ? ORDER BY id LIMIT ?",
@@ -298,7 +327,13 @@ def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[s
     ).fetchall()
     rows = list(liked) + list(playlist)
     eligible = {video_id for video_id, _channel, _title in rows}
+    return _seeds_from(conn, user_id, rows, eligible)
 
+
+def _seeds_from(conn, user_id, rows, eligible) -> list[tuple[str, str]]:
+    """Nameable (artist, track) pairs from the given rows: '- Topic' channels name
+    themselves, everything else needs a resolution. Deduped, since a song that is both
+    liked and in a playlist must not take two seed slots."""
     seeds: list[tuple[str, str]] = []
     for _video_id, channel_title, title in rows:
         if channel_title and channel_title.endswith(" - Topic"):
@@ -307,7 +342,6 @@ def get_clean_seed_songs(conn: sqlite3.Connection, user_id: int) -> list[tuple[s
         if artist and track and video_id in eligible:
             seeds.append((artist, track))
 
-    # A song that is both liked and sitting in a playlist must not take two seed slots.
     deduped: list[tuple[str, str]] = []
     seen = set()
     for artist, track in seeds:
@@ -414,6 +448,48 @@ def get_artist_details(conn, artist_name) -> dict | None:
 
 def set_user_syncing(conn, user_id, syncing) -> None:
     conn.execute("UPDATE users SET syncing = ? WHERE id = ?", (1 if syncing else 0, user_id))
+
+
+def set_user_prefs(conn, user_id, prefs: dict) -> None:
+    conn.execute("UPDATE users SET prefs = ? WHERE id = ?", (json.dumps(prefs), user_id))
+
+
+def get_user_prefs(conn, user_id) -> dict:
+    row = conn.execute("SELECT prefs FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row or not row[0]:
+        return dict(DEFAULT_PREFS)
+    try:
+        stored = json.loads(row[0])
+    except (ValueError, TypeError):
+        return dict(DEFAULT_PREFS)
+    if not isinstance(stored, dict):
+        return dict(DEFAULT_PREFS)
+    return {**DEFAULT_PREFS, **stored}
+
+
+def get_seedable_playlists(conn, user_id) -> list[dict]:
+    """Playlists with enough nameable songs to seed from, biggest first."""
+    resolved = {
+        r[0] for r in conn.execute("SELECT video_id FROM resolved_songs WHERE ok = 1").fetchall()
+    }
+    out = []
+    rows = conn.execute(
+        "SELECT id, playlist_id, title FROM playlists WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    for row_id, playlist_id, title in rows:
+        items = conn.execute(
+            "SELECT video_id, channel_title FROM playlist_items "
+            "WHERE playlist_row_id = ? AND category_id = '10'",
+            (row_id,),
+        ).fetchall()
+        count = sum(
+            1
+            for video_id, channel in items
+            if (channel and channel.endswith(" - Topic")) or video_id in resolved
+        )
+        if count >= MIN_SEEDABLE_PLAYLIST:
+            out.append({"playlist_id": playlist_id, "title": title, "count": count})
+    return sorted(out, key=lambda p: (-p["count"], p["title"]))
 
 
 def clear_all_syncing(conn) -> None:

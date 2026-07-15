@@ -528,6 +528,105 @@ def test_top_artists_excludes_covers_and_unverified():
     assert db.get_top_artists(conn, uid) == [("Real", 1)]
 
 
+def test_user_prefs_round_trip_and_defaults():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_p", "{}", "2026-07-16T00:00:00")
+    assert db.get_user_prefs(conn, uid) == db.DEFAULT_PREFS  # unset -> defaults
+    db.set_user_prefs(conn, uid, {"playlists": ["p1"], "discovery": "new", "mode": "adventurous"})
+    assert db.get_user_prefs(conn, uid) == {
+        "playlists": ["p1"],
+        "discovery": "new",
+        "mode": "adventurous",
+    }
+
+
+def test_user_prefs_fall_back_to_defaults_when_corrupt():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_p", "{}", "2026-07-16T00:00:00")
+    conn.execute("UPDATE users SET prefs = 'not json' WHERE id = ?", (uid,))
+    assert db.get_user_prefs(conn, uid) == db.DEFAULT_PREFS
+
+
+def test_init_db_adds_prefs_to_legacy_users():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT UNIQUE "
+        "NOT NULL, oauth_token TEXT NOT NULL, created_at TEXT NOT NULL)"
+    )
+    conn.execute("INSERT INTO users (channel_id, oauth_token, created_at) VALUES ('U','{}','t')")
+    conn.commit()
+    db.init_db(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    assert "prefs" in cols
+
+
+def _playlist(pid, title, n, channel="A - Topic"):
+    return {
+        "playlist_id": pid,
+        "title": title,
+        "items": [
+            {
+                "video_id": f"{pid}v{i}",
+                "title": f"{pid} song {i}",
+                "channel_title": channel,
+                "category_id": "10",
+            }
+            for i in range(n)
+        ],
+    }
+
+
+def test_seedable_playlists_reports_counts_and_hides_tiny_ones():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-16T00:00:00")
+    db.replace_playlists(
+        conn,
+        uid,
+        [
+            _playlist("big", "BonerJams", 30),
+            _playlist("mid", "Goes hard", 10),
+            _playlist("tiny", "Gura", 3),  # under the minimum
+        ],
+    )
+    got = db.get_seedable_playlists(conn, uid)
+    assert [(p["title"], p["count"]) for p in got] == [("BonerJams", 30), ("Goes hard", 10)]
+    assert got[0]["playlist_id"] == "big"
+
+
+def test_seedable_playlists_ignores_unnameable_songs():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-16T00:00:00")
+    # 10 songs but on a non-Topic channel and unresolved -> not nameable -> not seedable
+    db.replace_playlists(conn, uid, [_playlist("x", "Mystery", 10, channel="Some Uploader")])
+    assert db.get_seedable_playlists(conn, uid) == []
+
+
+def test_clean_seed_songs_can_be_restricted_to_chosen_playlists():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-16T00:00:00")
+    db.replace_liked_videos(
+        conn, uid, [{"video_id": "L1", "title": "liked song", "channel_title": "L - Topic"}]
+    )
+    db.replace_playlists(
+        conn, uid, [_playlist("keep", "Keep", 3, "K - Topic"), _playlist("drop", "Drop", 3)]
+    )
+    seeds = db.get_clean_seed_songs(conn, uid, playlist_ids=["keep"])
+    assert {a for a, _t in seeds} == {"K"}  # only the chosen playlist
+    assert ("L", "liked song") not in seeds  # liked songs excluded when a playlist is chosen
+
+
+def test_clean_seed_songs_unrestricted_when_no_playlists_chosen():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_s", "{}", "2026-07-16T00:00:00")
+    db.replace_liked_videos(
+        conn, uid, [{"video_id": "L1", "title": "liked song", "channel_title": "L - Topic"}]
+    )
+    db.replace_playlists(conn, uid, [_playlist("keep", "Keep", 2, "K - Topic")])
+    seeds = db.get_clean_seed_songs(conn, uid, playlist_ids=None)
+    assert ("L", "liked song") in seeds
+    assert {a for a, _t in seeds} == {"L", "K"}
+
+
 def test_clean_seed_songs_only_uses_the_most_recent_liked_songs():
     conn = make_conn()
     uid = db.get_or_create_user(conn, "UC_r", "{}", "2026-07-16T00:00:00")
