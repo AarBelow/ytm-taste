@@ -697,8 +697,37 @@ def test_artists_page_has_a_refresh_button(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _complete_fake_login(client, monkeypatch, tmp_path)
     body = client.get("/artists").text
-    assert 'action="/refresh"' in body
+    assert 'action="/refresh?next=/artists"' in body
     assert "Refresh my data" in body
+
+
+def test_recommendations_page_has_a_refresh_button(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    body = client.get("/recommendations").text
+    assert "Refresh my data" in body
+    # refreshing from this page must bring you back to this page, not /artists
+    assert 'action="/refresh?next=/recommendations"' in body
+
+
+def test_refresh_returns_to_the_page_it_was_triggered_from(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    _fake_refresh_deps(monkeypatch)
+    monkeypatch.setattr(main.sync, "run_sync", lambda *a, **kw: None)
+
+    r = client.post("/refresh?next=/recommendations")
+    assert r.headers["location"] == "/?next=/recommendations"
+
+
+def test_refresh_next_is_allowlisted(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+    _fake_refresh_deps(monkeypatch)
+    monkeypatch.setattr(main.sync, "run_sync", lambda *a, **kw: None)
+
+    r = client.post("/refresh?next=https://evil.example")
+    assert r.headers["location"] == "/?next=/artists"  # no open redirect
 
 
 def test_refresh_requires_login():

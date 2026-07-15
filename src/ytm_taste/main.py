@@ -266,9 +266,10 @@ def _safe_next(value) -> str:
     return value if value in _ALLOWED_NEXT else "/artists"
 
 
-def _topbar(refresh: bool = False) -> str:
+def _topbar(refresh: bool = False, next_path: str = "/artists") -> str:
+    # next_path brings the user back to the page they refreshed from.
     action = (
-        '<form class="refresh-form" method="post" action="/refresh">'
+        f'<form class="refresh-form" method="post" action="/refresh?next={next_path}">'
         '<button class="refresh-data-btn" type="submit">'
         '<span aria-hidden="true">&#8635;</span> Refresh my data</button></form>'
         if refresh
@@ -480,7 +481,7 @@ def _artist_card(a, hero: bool) -> str:
 def render_recommendations_page(recs) -> str:
     if not recs:
         body = (
-            f"{_topbar()}<h1>Songs You Might Like</h1>"
+            f"{_topbar(refresh=True, next_path='/recommendations')}<h1>Songs You Might Like</h1>"
             '<p class="empty">No recommendations yet — after you log in, the sync '
             "generates them in the background; give it a moment and refresh.</p>"
             f"{_pagenav('prev', '/artists', 'Your Top Artists')}"
@@ -544,7 +545,7 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
 </script>
 """
     body = (
-        f"{_topbar()}<h1>Songs You Might Like</h1>"
+        f"{_topbar(refresh=True, next_path='/recommendations')}<h1>Songs You Might Like</h1>"
         '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
         f'<ul class="recs">{"".join(cards)}</ul>'
         f"{more}"
@@ -609,9 +610,10 @@ def refresh(request: Request, background_tasks: BackgroundTasks):
     """Re-sync on demand, reusing the refresh token stored at login so the user
     never sees Google's consent screen again. POST, so a stray reload or a link
     prefetcher can't kick off a sync by accident."""
+    back_to = _safe_next(request.query_params.get("next"))
     user_id = request.session.get("user_id")
     if user_id is None:
-        return RedirectResponse("/login?next=/artists", status_code=303)
+        return RedirectResponse(f"/login?next={back_to}", status_code=303)
     conn = db.get_connection(DB_PATH)
     db.init_db(conn)
     try:
@@ -621,7 +623,7 @@ def refresh(request: Request, background_tasks: BackgroundTasks):
         conn.close()
         print(f"Stored token unusable, sending user back to login: {exc}")
         request.session.pop("user_id", None)
-        return RedirectResponse("/login?next=/artists", status_code=303)
+        return RedirectResponse(f"/login?next={back_to}", status_code=303)
     # Persist the (possibly refreshed) token so the next refresh still works.
     db.update_user_oauth_token(conn, user_id, credentials.to_json())
     db.set_user_syncing(conn, user_id, True)
@@ -632,7 +634,7 @@ def refresh(request: Request, background_tasks: BackgroundTasks):
         sync.run_sync, DB_PATH, user_id, youtube,
         lastfm_api_key=os.environ.get("LASTFM_API_KEY"),
     )
-    return RedirectResponse("/?next=/artists", status_code=303)
+    return RedirectResponse(f"/?next={back_to}", status_code=303)
 
 
 @app.get("/status")
