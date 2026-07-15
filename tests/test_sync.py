@@ -417,6 +417,40 @@ def test_run_sync_populates_artist_details(tmp_path):
     }
 
 
+def test_run_sync_fetches_similar_tracks_with_ten_workers(tmp_path, monkeypatch):
+    from ytm_taste import concurrency
+
+    seen = []
+    real = concurrency.run_concurrently
+
+    def spy(func, items, max_workers=5):
+        seen.append(max_workers)
+        return real(func, items, max_workers=max_workers)
+
+    monkeypatch.setattr(sync.concurrency, "run_concurrently", spy)
+
+    db_path = str(tmp_path / "test.db")
+    user_id = make_user(db_path, "UC_user1")
+    sync.run_sync(
+        db_path, user_id, youtube=object(),
+        fetch_liked_videos_fn=lambda yt: [
+            {"video_id": "v1", "title": "s", "channel_title": "A - Topic", "channel_id": "UCa"}
+        ],
+        fetch_playlists_fn=lambda yt: [],
+        fetch_playlist_items_fn=lambda yt, pid: [],
+        fetch_subscriptions_fn=lambda yt: [],
+        fetch_video_details_fn=lambda yt, ids: {},
+        lastfm_api_key="KEY",
+        fetch_similar_fn=lambda k, a, t: [],
+        fetch_song_meta_fn=lambda a, t: None,
+        fetch_channel_avatars_fn=lambda yt, ids: {},
+        fetch_artist_info_fn=lambda k, a: None,
+        fetch_artist_album_art_fn=lambda a: None,
+        verify_track_fn=lambda k, a, t: None,
+    )
+    assert 10 in seen  # the similar-track fetch asks for 10 workers
+
+
 def test_run_sync_clears_syncing_flag_on_success(tmp_path):
     db_path = str(tmp_path / "test.db")
     user_id = make_user(db_path, "UC_user1")
