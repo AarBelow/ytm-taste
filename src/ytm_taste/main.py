@@ -131,6 +131,20 @@ a:hover{text-decoration:underline}
   letter-spacing:.04em;margin:0 0 .4rem}
 .p-bio{color:var(--muted);font-size:.9rem;margin:0 0 .4rem}
 .p-fact{color:var(--muted);font-size:.8rem;opacity:.8;margin:0}
+.pagenav{display:flex;margin:2.25rem 0 0}
+.pagenav-link{display:flex;flex-direction:column;justify-content:center;gap:.1rem;
+  min-height:44px;min-width:min(300px,100%);padding:.85rem 1.25rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:16px;
+  transition:transform .2s,border-color .2s,box-shadow .2s}
+.pagenav-link:hover{text-decoration:none;transform:translateY(-3px);
+  border-color:var(--primary-glow);box-shadow:0 0 22px rgba(124,58,237,.4)}
+.pagenav-link:focus-visible{outline:2px solid var(--primary-glow);outline-offset:3px}
+.pagenav-dir{font-size:.7rem;text-transform:uppercase;letter-spacing:.16em;color:var(--muted)}
+.pagenav-title{font-family:'Righteous',cursive;font-size:1.05rem;color:var(--primary-glow)}
+.pagenav-link.next{margin-left:auto;text-align:right}
+.pagenav-link.prev{margin-right:auto}
+.pagenav-link.next .pagenav-title::after{content:" \\2192"}
+.pagenav-link.prev .pagenav-title::before{content:"\\2190 "}
 .topbar{display:flex;margin:0 0 1.5rem}
 .home-link{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1rem;
   font-family:'Righteous',cursive;font-size:.95rem;color:var(--primary-glow);
@@ -246,6 +260,19 @@ def _safe_next(value) -> str:
 
 def _topbar() -> str:
     return '<header class="topbar"><a class="home-link" href="/">ytm-taste</a></header>'
+
+
+def _pagenav(direction: str, href: str, title: str) -> str:
+    """Docs-style footer nav: a card previewing the destination page by name,
+    pinned to the edge matching its direction."""
+    label = "Next" if direction == "next" else "Previous"
+    return (
+        '<nav class="pagenav" aria-label="Page navigation">'
+        f'<a class="pagenav-link {direction}" href="{href}" '
+        f'aria-label="{label}: {title}">'
+        f'<span class="pagenav-dir">{label}</span>'
+        f'<span class="pagenav-title">{title}</span></a></nav>'
+    )
 
 
 def render_landing_page(logged_in: bool = False) -> str:
@@ -372,7 +399,7 @@ def render_results_page(artists) -> str:
             f"{_topbar()}<h1>Your Top Artists</h1>"
             '<p class="empty">No liked music synced yet — if you just logged in, '
             "give it a few seconds and refresh.</p>"
-            '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
+            f"{_pagenav('next', '/recommendations', 'Songs You Might Like')}"
         )
         return _html_page("Your Top Artists", body)
 
@@ -383,7 +410,7 @@ def render_results_page(artists) -> str:
         f"{_topbar()}<h1>Your Top Artists</h1>"
         '<p class="sub">Your most-played artists across likes and playlists.</p>'
         f"{hero}{ranked_block}"
-        '<p><a href="/recommendations">Songs you might like &rarr;</a></p>'
+        f"{_pagenav('next', '/recommendations', 'Songs You Might Like')}"
     )
     return _html_page("Your Top Artists", body)
 
@@ -438,7 +465,7 @@ def render_recommendations_page(recs) -> str:
             f"{_topbar()}<h1>Songs You Might Like</h1>"
             '<p class="empty">No recommendations yet — after you log in, the sync '
             "generates them in the background; give it a moment and refresh.</p>"
-            '<p><a href="/artists">&larr; back to your top artists</a></p>'
+            f"{_pagenav('prev', '/artists', 'Your Top Artists')}"
         )
         return _html_page("Songs You Might Like", body)
 
@@ -484,7 +511,7 @@ if(moreBtn){ moreBtn.addEventListener('click', function(){
         '<p class="sub">Hover a cover to spin it and hear a preview.</p>'
         f'<ul class="recs">{"".join(cards)}</ul>'
         f"{more}"
-        '<p><a href="/artists">&larr; back to your top artists</a></p>'
+        f"{_pagenav('prev', '/artists', 'Your Top Artists')}"
         f"{script}"
     )
     return _html_page("Songs You Might Like", body)

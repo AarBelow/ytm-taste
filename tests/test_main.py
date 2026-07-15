@@ -638,6 +638,25 @@ def test_artists_and_recommendations_have_home_button(monkeypatch, tmp_path):
         assert 'class="home-link" href="/"' in body
 
 
+def test_pages_use_docs_style_prev_next_nav(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    _complete_fake_login(client, monkeypatch, tmp_path)
+
+    artists = client.get("/artists").text
+    # Next card previews the destination by name, not a bare "click here" link.
+    assert 'class="pagenav-link next"' in artists
+    assert 'href="/recommendations"' in artists
+    assert "Songs You Might Like" in artists
+    assert 'aria-label="Next: Songs You Might Like"' in artists
+    assert "Songs you might like &rarr;" not in artists  # old bare text link is gone
+
+    recs = client.get("/recommendations").text
+    assert 'class="pagenav-link prev"' in recs
+    assert 'href="/artists"' in recs
+    assert 'aria-label="Previous: Your Top Artists"' in recs
+    assert "back to your top artists" not in recs
+
+
 def test_loading_page_only_navigates_when_ready():
     page = main.render_loading_page("/artists")
     # The ONLY navigation is the ready path. A fail-safe redirect here would
