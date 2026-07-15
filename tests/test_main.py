@@ -853,6 +853,14 @@ def _recs_page_with_prefs(client, monkeypatch, tmp_path, prefs=None):
     return db_path, client.get("/recommendations").text
 
 
+def test_hidden_overlay_and_menu_actually_stay_hidden():
+    # `display:flex` on these beats the browser's own [hidden]{display:none} at equal
+    # specificity, so without an explicit rule the wizard renders OPEN on page load and
+    # the close button appears to do nothing. Compound selectors win regardless of order.
+    assert ".ft-overlay[hidden]" in main.BASE_STYLES
+    assert ".ft-menu[hidden]" in main.BASE_STYLES
+
+
 def test_fine_tune_is_behind_a_gear_menu_not_a_bare_button(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _db, body = _recs_page_with_prefs(client, monkeypatch, tmp_path)

@@ -148,6 +148,9 @@ a:hover{text-decoration:underline}
 .ft-item:focus-visible{outline:2px solid var(--primary-glow);outline-offset:-2px}
 .ft-overlay{position:fixed;inset:0;z-index:30;display:flex;align-items:center;
   justify-content:center;padding:1.25rem;background:rgba(6,4,12,.72)}
+/* `display:flex` above beats the browser's [hidden]{display:none} at equal specificity,
+   so the wizard would render open on load. A compound selector wins whatever the order. */
+.ft-overlay[hidden],.ft-menu[hidden]{display:none}
 .ft-panel{position:relative;width:min(30rem,100%);padding:2rem;background:var(--surface);
   border:1px solid var(--border);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .ft-close{position:absolute;top:.6rem;right:.9rem;background:none;border:none;
