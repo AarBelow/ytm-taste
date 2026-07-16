@@ -414,10 +414,55 @@ def test_recommendations_page_shows_cards_with_cover_and_audio(monkeypatch, tmp_
     body = client.get("/recommendations").text
     assert "Boards of Canada" in body
     assert "Roygbiv" in body
-    assert "http://img/roy.jpg" in body
-    assert "http://au/roy.m4a" in body
+    assert "http://img/roy.jpg" in body  # cover URL is stored and used directly
+    # The stored preview URL is a dead Deezer signed link by render time, so the player
+    # points at /preview (which resolves a fresh one) rather than the stored value.
+    assert "http://au/roy.m4a" not in body
+    assert "/preview?" in body
+    assert "artist=Boards+of+Canada" in body
+    assert "track=Roygbiv" in body
     assert "<audio" in body
     assert "#7c3aed" in body.lower() or "--primary" in body
+
+
+def test_recommendations_page_omits_audio_when_no_preview_existed(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    # preview_url None -> Deezer had no preview for this track at sync time
+    db_module.replace_recommendations(conn, user_id, [("A", "T", 1.0, "http://img/a.jpg", None)])
+    conn.commit()
+    conn.close()
+
+    body = client.get("/recommendations").text
+    assert "<audio" not in body
+
+
+def test_preview_endpoint_redirects_to_a_fresh_deezer_url(monkeypatch, tmp_path):
+    from ytm_taste import deezer_client
+
+    monkeypatch.setattr(main, "_preview_cache", {})
+    monkeypatch.setattr(
+        deezer_client, "fetch_preview_url", lambda a, t: "https://cdn/fresh.mp3"
+    )
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/preview", params={"artist": "potsu", "track": "friends"})
+    assert r.status_code == 307
+    assert r.headers["location"] == "https://cdn/fresh.mp3"
+
+
+def test_preview_endpoint_404s_when_deezer_has_no_preview(monkeypatch):
+    from ytm_taste import deezer_client
+
+    monkeypatch.setattr(main, "_preview_cache", {})
+    monkeypatch.setattr(deezer_client, "fetch_preview_url", lambda a, t: None)
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/preview", params={"artist": "x", "track": "y"})
+    assert r.status_code == 404
 
 
 def test_recommendations_page_has_show_more_when_over_five(monkeypatch, tmp_path):

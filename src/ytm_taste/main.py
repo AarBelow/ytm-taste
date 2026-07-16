@@ -2,6 +2,7 @@
 import base64
 import html
 import os
+import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
-from ytm_taste import db, google_oauth, recommendations, sync, youtube_client
+from ytm_taste import db, deezer_client, google_oauth, recommendations, sync, youtube_client
 
 load_dotenv()
 
@@ -558,6 +559,33 @@ def artist_avatar(artist: str):
     )
 
 
+# Deezer signs preview URLs with a ~12-minute expiry, so they can't be stored at sync
+# time -- we resolve them fresh when a card is actually played. Cache the lookup briefly
+# (well under the expiry) so replaying the same card doesn't re-hit Deezer each hover.
+_preview_cache: dict[tuple[str, str], tuple[float, str]] = {}
+_PREVIEW_TTL_SECONDS = 300
+
+
+def _resolve_preview(artist: str, track: str) -> str | None:
+    key = (artist, track)
+    now = time.monotonic()
+    cached = _preview_cache.get(key)
+    if cached is not None and now - cached[0] < _PREVIEW_TTL_SECONDS:
+        return cached[1]
+    url = deezer_client.fetch_preview_url(artist, track)
+    if url:
+        _preview_cache[key] = (now, url)
+    return url
+
+
+@app.get("/preview")
+def preview(artist: str, track: str):
+    url = _resolve_preview(artist, track)
+    if not url:
+        return Response(status_code=404)
+    return RedirectResponse(url)
+
+
 def render_results_page(artists) -> str:
     if not artists:
         body = (
@@ -642,15 +670,18 @@ def render_recommendations_page(recs, playlists=None, prefs=None) -> str:
         if image_url:
             cover = f'<img class="cover" loading="lazy" src="{html.escape(image_url)}" alt="">'
         else:
-            # Apple has no artwork for this song. An empty box looks like a failed
-            # image; the artist's initial reads as deliberate, matching the avatars.
+            # No cover art for this song. An empty box looks like a failed image;
+            # the artist's initial reads as deliberate, matching the avatars.
             initial = html.escape(artist[:1].upper() or "?")
             cover = f'<div class="cover cover-ph">{initial}</div>'
-        audio = (
-            f'<audio preload="none" src="{html.escape(preview_url)}"></audio>'
-            if preview_url
-            else ""
-        )
+        # preview_url is only a "this song had a preview at sync time" flag; the URL
+        # itself has long since expired. Point the player at /preview, which fetches a
+        # fresh signed URL from Deezer on demand.
+        if preview_url:
+            src = "/preview?" + urllib.parse.urlencode({"artist": artist, "track": track})
+            audio = f'<audio preload="none" src="{html.escape(src)}"></audio>'
+        else:
+            audio = ""
         cards.append(
             f'<li class="card{hidden}">'
             f'<div class="cover-wrap">{cover}</div>'

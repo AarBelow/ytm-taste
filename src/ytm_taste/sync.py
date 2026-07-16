@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from ytm_taste import (
     concurrency,
     db,
-    itunes_client,
+    deezer_client,
     lastfm_client,
     recommendations,
     song_resolver,
@@ -34,10 +34,10 @@ def run_sync(
     fetch_video_details_fn=youtube_client.fetch_video_details,
     lastfm_api_key=None,
     fetch_similar_fn=lastfm_client.fetch_similar_tracks,
-    fetch_song_meta_fn=itunes_client.fetch_song_meta,
+    fetch_song_meta_fn=deezer_client.fetch_song_meta,
     fetch_channel_avatars_fn=youtube_client.fetch_channel_avatars,
     fetch_artist_info_fn=lastfm_client.fetch_artist_info,
-    fetch_artist_album_art_fn=itunes_client.fetch_artist_album_art,
+    fetch_artist_album_art_fn=deezer_client.fetch_artist_album_art,
     verify_track_fn=lastfm_client.verify_track,
 ) -> dict:
     start = time.monotonic()
@@ -197,7 +197,7 @@ def rerank(
     user_id: int,
     lastfm_api_key=None,
     fetch_similar_fn=lastfm_client.fetch_similar_tracks,
-    fetch_song_meta_fn=itunes_client.fetch_song_meta,
+    fetch_song_meta_fn=deezer_client.fetch_song_meta,
 ) -> dict:
     """Rebuild recommendations from the user's fine-tune preferences.
 
