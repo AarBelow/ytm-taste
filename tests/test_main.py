@@ -423,6 +423,29 @@ def test_recommendations_page_shows_cards_with_cover_and_audio(monkeypatch, tmp_
     assert "track=Roygbiv" in body
     assert "<audio" in body
     assert "#7c3aed" in body.lower() or "--primary" in body
+    # Clicking the card opens the song on YouTube Music in a new tab (no API/quota).
+    assert "music.youtube.com/search?q=Boards+of+Canada+Roygbiv" in body
+    assert 'class="song-link"' in body
+    assert 'target="_blank"' in body
+    assert 'rel="noopener"' in body
+
+
+def test_recommendation_song_link_escapes_special_characters(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    # An ampersand in a title must be URL-encoded in the href, never break the HTML.
+    db_module.replace_recommendations(conn, user_id, [("AC/DC", "Rock & Roll", 1.0, None, None)])
+    conn.commit()
+    conn.close()
+
+    body = client.get("/recommendations").text
+    assert "Rock+%26+Roll" in body  # & encoded in the query string
+    assert "AC%2FDC" in body  # / encoded
 
 
 def test_recommendations_page_omits_audio_when_no_preview_existed(monkeypatch, tmp_path):

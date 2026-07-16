@@ -89,9 +89,12 @@ a:hover{text-decoration:underline}
 .empty{color:var(--muted)}
 .recs{display:flex;flex-wrap:wrap;justify-content:center;align-items:stretch;
   gap:1.25rem;list-style:none;padding:0;margin:1.5rem 0}
-.card{flex:0 0 170px;background:var(--surface);border:1px solid var(--border);border-radius:16px;
-  padding:1rem;text-align:center;cursor:pointer;transition:transform .2s,box-shadow .2s}
+.card{position:relative;flex:0 0 170px;background:var(--surface);border:1px solid var(--border);
+  border-radius:16px;padding:1rem;text-align:center;cursor:pointer;
+  transition:transform .2s,box-shadow .2s}
 .card:hover{transform:translateY(-4px);box-shadow:0 0 24px rgba(124,58,237,.45)}
+.song-link{position:absolute;inset:0;border-radius:16px;z-index:2}
+.song-link:focus-visible{outline:2px solid var(--primary-glow);outline-offset:2px}
 .cover-wrap{position:relative;width:120px;height:120px;margin:0 auto .75rem}
 .cover{width:100%;height:100%;border-radius:12px;object-fit:cover;
   transition:border-radius .3s;background:var(--surface-2)}
@@ -682,8 +685,19 @@ def render_recommendations_page(recs, playlists=None, prefs=None) -> str:
             audio = f'<audio preload="none" src="{html.escape(src)}"></audio>'
         else:
             audio = ""
+        # Clicking a card opens the song on YouTube Music in a new tab. The search
+        # lands on the track as the top result -- no API call, so it costs no quota.
+        yt_url = "https://music.youtube.com/search?" + urllib.parse.urlencode(
+            {"q": f"{artist} {track}"}
+        )
+        yt_label = html.escape(f"Open {artist} – {track} on YouTube Music")
+        song_link = (
+            f'<a class="song-link" href="{html.escape(yt_url)}" target="_blank" '
+            f'rel="noopener" aria-label="{yt_label}"></a>'
+        )
         cards.append(
             f'<li class="card{hidden}">'
+            f"{song_link}"
             f'<div class="cover-wrap">{cover}</div>'
             f'<div class="artist">{html.escape(artist)}</div>'
             f'<div class="track">{html.escape(track)}</div>'
