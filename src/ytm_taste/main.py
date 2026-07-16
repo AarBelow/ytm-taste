@@ -589,6 +589,31 @@ def preview(artist: str, track: str):
     return RedirectResponse(url)
 
 
+# The faded album cover behind each artist card. Fetched fresh here rather than stored
+# during the sync: the sync's storage step kept coming back empty on the host even
+# though Deezer answers fine one request at a time. Deezer cover URLs are static (no
+# expiry, load with any referer), so a resolved one is cached for the process lifetime.
+_artist_cover_cache: dict[str, str] = {}
+
+
+def _resolve_artist_cover(artist: str) -> str | None:
+    cached = _artist_cover_cache.get(artist)
+    if cached:
+        return cached
+    url = deezer_client.fetch_artist_album_art(artist)
+    if url:
+        _artist_cover_cache[artist] = url
+    return url
+
+
+@app.get("/artist-cover")
+def artist_cover(artist: str):
+    url = _resolve_artist_cover(artist)
+    if not url:
+        return Response(status_code=404)
+    return RedirectResponse(url)
+
+
 def render_results_page(artists) -> str:
     if not artists:
         body = (
@@ -627,15 +652,15 @@ def _artist_card(a, hero: bool) -> str:
         if a["listeners"]
         else ""
     )
-    if a.get("album"):
-        # The hero shows more of its album art; ranked cards keep it more faded.
-        overlay = "rgba(23,17,48,.80)" if hero else "rgba(23,17,48,.88)"
-        style = (
-            f' style="background-image:linear-gradient({overlay},{overlay}),'
-            f"url('{html.escape(a['album'])}')\""
-        )
-    else:
-        style = ""
+    # The faded album cover behind the card, resolved on demand by /artist-cover. If
+    # Deezer has no art the request 404s and only the gradient layer shows -- the same
+    # look as before. The hero shows more of its art; ranked cards keep it more faded.
+    overlay = "rgba(23,17,48,.80)" if hero else "rgba(23,17,48,.88)"
+    cover_src = "/artist-cover?artist=" + urllib.parse.quote(a["name"])
+    style = (
+        f' style="background-image:linear-gradient({overlay},{overlay}),'
+        f"url('{html.escape(cover_src)}')\""
+    )
     if a.get("channel_id"):
         url = f"https://www.youtube.com/channel/{html.escape(a['channel_id'])}"
         link = (

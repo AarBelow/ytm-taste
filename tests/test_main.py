@@ -575,8 +575,31 @@ def test_home_renders_artist_profile_cards(monkeypatch, tmp_path):
     # avatar is served through our proxy, not hotlinked from Google
     assert "/artist-avatar?artist=Alpha" in body
     assert "listeners" in body.lower()
-    assert "http://alb/a.jpg" in body
+    # the album background is resolved fresh via /artist-cover, not the stored URL
+    assert "/artist-cover?artist=Alpha" in body
+    assert "http://alb/a.jpg" not in body
     assert "background-image" in body
+
+
+def test_artist_cover_redirects_to_a_deezer_url(monkeypatch, tmp_path):
+    from ytm_taste import deezer_client
+
+    monkeypatch.setattr(main, "_artist_cover_cache", {})
+    monkeypatch.setattr(deezer_client, "fetch_artist_album_art", lambda a: "https://img/cov.jpg")
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/artist-cover", params={"artist": "King Gnu"})
+    assert r.status_code == 307
+    assert r.headers["location"] == "https://img/cov.jpg"
+
+
+def test_artist_cover_404s_when_deezer_has_no_art(monkeypatch):
+    from ytm_taste import deezer_client
+
+    monkeypatch.setattr(main, "_artist_cover_cache", {})
+    monkeypatch.setattr(deezer_client, "fetch_artist_album_art", lambda a: None)
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/artist-cover", params={"artist": "nobody"})
+    assert r.status_code == 404
 
 
 def test_home_links_artist_card_to_youtube_channel(monkeypatch, tmp_path):
