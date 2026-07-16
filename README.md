@@ -59,8 +59,6 @@ One-time setup, done once by whoever runs this app:
    GOOGLE_WEB_CLIENT_SECRET=<your web client secret>
    SECRET_KEY=<any random string, used to sign login session cookies>
    ```
-   (`GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` are left over from
-   an earlier, now-unused device-flow login attempt and can stay blank.)
 4. In that same OAuth client's consent screen, add each person's Google
    account email as a **test user** before they can log in — required
    while the app is unverified (fine for a handful of friends; capped at
