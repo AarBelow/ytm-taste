@@ -26,9 +26,10 @@ def make_get(data, calls=None):
     return fake_get
 
 
-def _song(preview="https://cdn/preview.mp3", cover_big="https://img/cover_big.jpg", **album):
+def _song(preview="https://cdn/preview.mp3", cover_big="https://img/cover_big.jpg",
+          artist="A", **album):
     album = {"cover_big": cover_big, **album}
-    return {"title": "T", "artist": {"name": "A"}, "preview": preview, "album": album}
+    return {"title": "T", "artist": {"name": artist}, "preview": preview, "album": album}
 
 
 def test_fetch_song_meta_returns_cover_and_preview():
@@ -78,8 +79,33 @@ def test_fetch_song_meta_returns_none_on_empty_body():
 
 
 def test_fetch_artist_album_art_returns_a_cover_url():
-    result = deezer_client.fetch_artist_album_art("King Gnu", get_fn=make_get({"data": [_song()]}))
+    data = {"data": [_song(artist="King Gnu")]}
+    result = deezer_client.fetch_artist_album_art("King Gnu", get_fn=make_get(data))
     assert result == "https://img/cover_big.jpg"
+
+
+def test_fetch_artist_album_art_skips_results_by_a_different_artist():
+    # The real Kaz Moon bug: Deezer's fuzzy artist filter ranked a stranger's track
+    # first. We must take the first result actually BY the searched artist.
+    data = {
+        "data": [
+            _song(artist="KARD", cover_big="https://img/WRONG.jpg"),
+            _song(artist="Kaz Moon", cover_big="https://img/right.jpg"),
+        ]
+    }
+    result = deezer_client.fetch_artist_album_art("Kaz Moon", get_fn=make_get(data))
+    assert result == "https://img/right.jpg"
+
+
+def test_fetch_artist_album_art_matches_artist_case_insensitively():
+    data = {"data": [_song(artist="kaz moon", cover_big="https://img/c.jpg")]}
+    assert deezer_client.fetch_artist_album_art("Kaz Moon", get_fn=make_get(data)) == "https://img/c.jpg"
+
+
+def test_fetch_artist_album_art_returns_none_when_no_result_is_by_the_artist():
+    # Only a stranger's track came back -> better no background than a wrong one.
+    data = {"data": [_song(artist="Somebody Else")]}
+    assert deezer_client.fetch_artist_album_art("Kaz Moon", get_fn=make_get(data)) is None
 
 
 def test_fetch_artist_album_art_returns_none_when_empty():

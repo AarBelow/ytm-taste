@@ -61,10 +61,20 @@ def fetch_preview_url(artist, track, get_fn=requests.get) -> str | None:
     return first.get("preview") or None
 
 
+def _is_by(item: dict, artist: str) -> bool:
+    name = ((item.get("artist") or {}).get("name") or "").casefold().strip()
+    return name == artist.casefold().strip()
+
+
 def fetch_artist_album_art(artist, get_fn=requests.get) -> str | None:
     results = _search(f'artist:"{artist}"', get_fn)
     if not results:
         results = _search(artist, get_fn)
-    if not results:
+    # Deezer's artist: filter is fuzzy -- a search for "Kaz Moon" ranks a different
+    # act's "Moonlight" first -- so take the first result actually BY this artist, not
+    # results[0], or we hang a stranger's album cover behind the card. Better no art
+    # (just the gradient) than the wrong art.
+    match = next((r for r in results if _is_by(r, artist)), None)
+    if match is None:
         return None
-    return _cover(results[0].get("album") or {})
+    return _cover(match.get("album") or {})
