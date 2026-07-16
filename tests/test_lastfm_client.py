@@ -1,4 +1,6 @@
 # tests/test_lastfm_client.py
+import json
+
 from ytm_taste import lastfm_client
 
 
@@ -8,6 +10,30 @@ class FakeResponse:
 
     def json(self):
         return self._data
+
+
+class EmptyBodyResponse:
+    """A blank or non-JSON body (rate limit, gateway error) makes response.json()
+    raise JSONDecodeError; the client must treat that as 'no data', not crash."""
+
+    def json(self):
+        return json.loads("")
+
+
+def _empty_get(url, params=None, timeout=None):
+    return EmptyBodyResponse()
+
+
+def test_fetch_similar_tracks_returns_empty_on_empty_body():
+    assert lastfm_client.fetch_similar_tracks("k", "a", "t", get_fn=_empty_get) == []
+
+
+def test_fetch_artist_info_returns_none_on_empty_body():
+    assert lastfm_client.fetch_artist_info("k", "a", get_fn=_empty_get) is None
+
+
+def test_verify_track_returns_none_on_empty_body():
+    assert lastfm_client.verify_track("k", "a", "t", get_fn=_empty_get) is None
 
 
 def make_get(data, calls):

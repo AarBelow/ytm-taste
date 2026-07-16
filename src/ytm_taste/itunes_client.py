@@ -10,6 +10,16 @@ API_URL = "https://itunes.apple.com/search"
 SEARCH_LIMIT = 3
 
 
+def _read_json(response):
+    """iTunes rate-limits datacenter IPs (e.g. a hosted server) with an empty body,
+    so response.json() raises. A blank response means 'no match', not a crash, so
+    fall back to None and let the existing isinstance checks handle it."""
+    try:
+        return response.json()
+    except ValueError:  # JSONDecodeError is a ValueError; also covers a non-JSON body
+        return None
+
+
 def fetch_song_meta(artist, track, get_fn=requests.get) -> dict | None:
     response = get_fn(
         API_URL,
@@ -21,7 +31,7 @@ def fetch_song_meta(artist, track, get_fn=requests.get) -> dict | None:
         },
         timeout=10,
     )
-    data = response.json()
+    data = _read_json(response)
     if not isinstance(data, dict):
         return None
     results = data.get("results") or []
@@ -42,7 +52,7 @@ def fetch_artist_album_art(artist, get_fn=requests.get) -> str | None:
         params={"term": artist, "media": "music", "entity": "album", "limit": SEARCH_LIMIT},
         timeout=10,
     )
-    data = response.json()
+    data = _read_json(response)
     if not isinstance(data, dict):
         return None
     results = data.get("results") or []

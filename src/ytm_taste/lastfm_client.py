@@ -8,6 +8,15 @@ from ytm_taste.genres import GENRES
 API_URL = "http://ws.audioscrobbler.com/2.0/"
 
 
+def _read_json(response):
+    """A blank or non-JSON body (rate limit, gateway error) makes response.json()
+    raise; treat it as 'no data' so a single bad response can't crash the caller."""
+    try:
+        return response.json()
+    except ValueError:  # JSONDecodeError is a ValueError; also covers a non-JSON body
+        return None
+
+
 def fetch_similar_tracks(api_key, artist, track, limit=50, get_fn=requests.get) -> list[dict]:
     response = get_fn(
         API_URL,
@@ -22,7 +31,7 @@ def fetch_similar_tracks(api_key, artist, track, limit=50, get_fn=requests.get) 
         },
         timeout=10,
     )
-    data = response.json()
+    data = _read_json(response)
     if not isinstance(data, dict):
         return []
     tracks = data.get("similartracks", {}).get("track", [])
@@ -77,7 +86,7 @@ def fetch_artist_info(api_key, artist, get_fn=requests.get) -> dict | None:
         },
         timeout=10,
     )
-    data = response.json()
+    data = _read_json(response)
     if not isinstance(data, dict) or "artist" not in data:
         return None
     a = data["artist"]
@@ -108,7 +117,7 @@ def verify_track(api_key, artist, track, get_fn=requests.get) -> dict | None:
         },
         timeout=10,
     )
-    data = response.json()
+    data = _read_json(response)
     if not isinstance(data, dict):
         return None
     found = data.get("track")

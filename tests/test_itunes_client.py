@@ -1,4 +1,6 @@
 # tests/test_itunes_client.py
+import json
+
 from ytm_taste import itunes_client
 
 
@@ -8,6 +10,31 @@ class FakeResponse:
 
     def json(self):
         return self._data
+
+
+class EmptyBodyResponse:
+    """iTunes rate-limits datacenter IPs (e.g. Railway) with an empty 403 body, so
+    response.json() raises JSONDecodeError instead of returning data."""
+
+    def json(self):
+        return json.loads("")  # raises "Expecting value: line 1 column 1 (char 0)"
+
+
+def make_empty_get():
+    def fake_get(url, params=None, timeout=None):
+        return EmptyBodyResponse()
+
+    return fake_get
+
+
+def test_fetch_artist_album_art_returns_none_on_empty_body_instead_of_crashing():
+    # Observed on Railway: an empty iTunes response crashed the whole sync's artist
+    # enrichment, which rolled back the avatars and genres fetched alongside it.
+    assert itunes_client.fetch_artist_album_art("potsu", get_fn=make_empty_get()) is None
+
+
+def test_fetch_song_meta_returns_none_on_empty_body_instead_of_crashing():
+    assert itunes_client.fetch_song_meta("a", "b", get_fn=make_empty_get()) is None
 
 
 def make_get(data, calls=None):
