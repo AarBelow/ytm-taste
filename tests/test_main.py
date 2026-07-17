@@ -782,6 +782,40 @@ def test_home_shows_landing_for_logged_in_user_with_no_pending_target(monkeypatc
     assert "Connect YouTube" not in body  # already connected
 
 
+def test_landing_shows_refresh_bar_and_stats_when_synced(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_liked_videos(
+        conn, user_id, [{"video_id": "v1", "title": "S", "channel_title": "Alpha - Topic"}]
+    )
+    db_module.replace_recommendations(conn, user_id, [("X", "a", 1.0, None, None)])
+    conn.commit()
+    conn.close()
+
+    client.get("/")  # drain the pending target from login
+    body = client.get("/").text
+    # top bar to re-sync
+    assert 'action="/refresh?next=/artists"' in body
+    assert "Refresh my data" in body
+    # the headline stats
+    assert "tracks analyzed" in body
+    assert "artists ranked" in body
+    assert "song recs" in body
+    assert 'class="stat-n"' in body
+
+
+def test_logged_out_landing_has_no_refresh_or_stats():
+    body = TestClient(main.app).get("/").text
+    assert "Refresh my data" not in body
+    assert "tracks analyzed" not in body
+    assert "Connect YouTube" in body
+
+
 def test_home_still_honours_explicit_next_when_ready(monkeypatch, tmp_path):
     client = TestClient(main.app, follow_redirects=False)
     _complete_fake_login(client, monkeypatch, tmp_path)

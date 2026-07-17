@@ -261,6 +261,13 @@ a:hover{text-decoration:underline}
 .tile-h{font-weight:600}
 .tile-p{font-size:.82rem;color:var(--muted)}
 @media (max-width:560px){.tiles{grid-template-columns:1fr}}
+.landing-bar .refresh-form{margin-left:0}
+.stats{display:flex;justify-content:center;flex-wrap:wrap;gap:3.5rem;width:100%;
+  margin-top:2.25rem;padding-top:1.75rem;border-top:1px solid var(--border)}
+.stat{display:flex;flex-direction:column;align-items:center;gap:.15rem}
+.stat-n{font-family:'Righteous',cursive;font-size:2rem;color:var(--fg);
+  font-variant-numeric:tabular-nums}
+.stat-l{font-size:.8rem;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.eq span{animation:none;height:32px}.landing{animation:none}}
 """
 
@@ -402,7 +409,22 @@ def _pagenav(direction: str, href: str, title: str) -> str:
     )
 
 
-def render_landing_page(logged_in: bool = False) -> str:
+def _landing_stats(stats: dict | None) -> str:
+    if not stats:
+        return ""
+    cells = "".join(
+        f'<div class="stat"><span class="stat-n">{value:,}</span>'
+        f'<span class="stat-l">{label}</span></div>'
+        for value, label in (
+            (stats["tracks"], "tracks analyzed"),
+            (stats["artists"], "artists ranked"),
+            (stats["recs"], "song recs"),
+        )
+    )
+    return f'<div class="stats">{cells}</div>'
+
+
+def render_landing_page(logged_in: bool = False, stats: dict | None = None) -> str:
     tiles = (
         '<a class="tile" href="/artists"><span class="tile-ic">&#127911;</span>'
         '<span class="tile-h">Top Artists</span>'
@@ -422,12 +444,21 @@ def render_landing_page(logged_in: bool = False) -> str:
     if logged_in:
         blurb = "Your top artists, song recs, and instant previews are ready."
         cta = '<a class="cta" href="/artists">View your taste &rarr;</a>'
+        # Already synced -> a top bar to re-sync on demand, matching the other pages.
+        top = (
+            '<header class="topbar landing-bar">'
+            '<form class="refresh-form" method="post" action="/refresh?next=/artists">'
+            '<button class="refresh-data-btn" type="submit">'
+            '<span aria-hidden="true">&#8635;</span> Refresh my data</button></form></header>'
+        )
     else:
         blurb = (
             "Connect your YouTube account for your top artists, song recs, and instant previews."
         )
         cta = '<a class="cta" href="/login">Connect YouTube</a>'
+        top = ""
     body = (
+        f"{top}"
         '<div class="landing">'
         '<p class="eyebrow2">YouTube Music &middot; Taste Analyzer</p>'
         '<h1 class="wordmark">ytm-taste</h1>'
@@ -436,6 +467,7 @@ def render_landing_page(logged_in: bool = False) -> str:
         f"{eq}"
         f"{cta}"
         f'<div class="tiles">{tiles}</div>'
+        f"{_landing_stats(stats)}"
         "</div>"
     )
     return _html_page("ytm-taste", body)
@@ -812,12 +844,13 @@ def read_root(request: Request):
     # is what the Home button wants.
     explicit = request.query_params.get("next") or request.session.pop("post_sync_next", None)
     ready = db.is_sync_ready(conn, user_id)
+    stats = db.get_library_stats(conn, user_id) if ready else None
     conn.close()
     if not ready:
         return HTMLResponse(render_loading_page(_safe_next(explicit)))
     if explicit:
         return RedirectResponse(_safe_next(explicit))
-    return HTMLResponse(render_landing_page(logged_in=True))
+    return HTMLResponse(render_landing_page(logged_in=True, stats=stats))
 
 
 @app.get("/artists")

@@ -404,6 +404,18 @@ def get_recommendations(conn: sqlite3.Connection, user_id: int):
     return [(a, t, s, img, prev) for (a, t, s, img, prev) in rows]
 
 
+def get_library_stats(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Headline counts for the landing page once a user has synced: how many distinct
+    tracks were analyzed, how many artists were ranked, and how many recommendations
+    are currently on offer."""
+    tracks = len(get_owned_song_keys(conn, user_id))
+    artists = len(get_top_artists(conn, user_id))
+    recs = conn.execute(
+        "SELECT COUNT(*) FROM recommendations WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    return {"tracks": tracks, "artists": artists, "recs": recs}
+
+
 def get_top_artist_channels(conn: sqlite3.Connection, user_id: int) -> dict:
     rows = conn.execute(
         """

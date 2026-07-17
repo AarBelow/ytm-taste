@@ -10,6 +10,30 @@ def make_conn():
     return conn
 
 
+def test_get_library_stats_counts_tracks_artists_and_recs():
+    conn = make_conn()
+    uid = db.get_or_create_user(conn, "UC_u", '{"access_token": "a"}', "2026-07-13T00:00:00")
+    db.replace_liked_videos(
+        conn,
+        uid,
+        [
+            {"video_id": "v1", "title": "Song One", "channel_title": "Alpha - Topic"},
+            {"video_id": "v2", "title": "Song Two", "channel_title": "Beta - Topic"},
+        ],
+    )
+    db.replace_recommendations(
+        conn, uid, [("X", "a", 1.0, None, None), ("Y", "b", 0.9, None, None)]
+    )
+    conn.commit()
+
+    stats = db.get_library_stats(conn, uid)
+    assert stats["recs"] == 2
+    # wiring matches the underlying helpers rather than re-deriving crediting rules here
+    assert stats["tracks"] == len(db.get_owned_song_keys(conn, uid))
+    assert stats["artists"] == len(db.get_top_artists(conn, uid))
+    assert stats["tracks"] == 2
+
+
 def test_get_or_create_user_returns_same_id_for_existing_channel_id():
     conn = make_conn()
     first_id = db.get_or_create_user(
