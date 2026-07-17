@@ -657,9 +657,28 @@ def test_home_renders_hero_and_ranked_list(monkeypatch, tmp_path):
     assert body.index("Alpha") < body.index("Beta")
 
 
-def test_base_styles_includes_painterly_background():
-    assert "data:image/svg+xml;base64," in main.BASE_STYLES
-    assert "background-attachment:fixed" in main.BASE_STYLES
+def test_no_painterly_background_streaks():
+    # The brush-stroke background was removed for a clean flat surface.
+    assert "data:image/svg+xml;base64," not in main.BASE_STYLES
+    assert "background-attachment:fixed" not in main.BASE_STYLES
+
+
+def test_recommendations_page_uses_the_wide_container(monkeypatch, tmp_path):
+    client = TestClient(main.app, follow_redirects=False)
+    db_path = _complete_fake_login(client, monkeypatch, tmp_path)
+
+    from ytm_taste import db as db_module
+
+    conn = db_module.get_connection(db_path)
+    user_id = conn.execute("SELECT id FROM users").fetchone()[0]
+    db_module.replace_recommendations(conn, user_id, [("A", "T", 1.0, None, None)])
+    conn.commit()
+    conn.close()
+
+    body = client.get("/recommendations").text
+    assert 'class="container wide"' in body
+    # a non-recs page keeps the standard container
+    assert 'class="container"' in client.get("/artists").text
 
 
 def test_base_styles_includes_staggered_card_animation():

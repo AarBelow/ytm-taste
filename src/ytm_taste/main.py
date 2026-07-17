@@ -1,5 +1,4 @@
 # src/ytm_taste/main.py
-import base64
 import html
 import os
 import time
@@ -75,6 +74,7 @@ BASE_STYLES = """
 body{margin:0;background-color:var(--bg);color:var(--fg);
   font-family:'Poppins',system-ui,sans-serif;line-height:1.6}
 .container{width:70%;max-width:1400px;margin:0 auto;padding:2.5rem 1.25rem}
+.container.wide{width:90%;max-width:1750px}
 h1{font-family:'Righteous',system-ui,cursive;font-weight:400;font-size:2rem;margin:0 0 .5rem;
   background:linear-gradient(90deg,var(--primary-glow),#e9d5ff);
   -webkit-background-clip:text;background-clip:text;color:transparent}
@@ -88,14 +88,14 @@ a:hover{text-decoration:underline}
 .count{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .empty{color:var(--muted)}
 .recs{display:flex;flex-wrap:wrap;justify-content:center;align-items:stretch;
-  gap:1.25rem;list-style:none;padding:0;margin:1.5rem 0}
-.card{position:relative;flex:0 0 170px;background:var(--surface);border:1px solid var(--border);
-  border-radius:16px;padding:1rem;text-align:center;cursor:pointer;
+  gap:1.75rem;list-style:none;padding:0;margin:1.5rem 0}
+.card{position:relative;flex:0 0 300px;background:var(--surface);border:1px solid var(--border);
+  border-radius:20px;padding:1.5rem;text-align:center;cursor:pointer;
   transition:transform .2s,box-shadow .2s}
 .card:hover{transform:translateY(-4px);box-shadow:0 0 24px rgba(124,58,237,.45)}
-.song-link{position:absolute;inset:0;border-radius:16px;z-index:2}
+.song-link{position:absolute;inset:0;border-radius:20px;z-index:2}
 .song-link:focus-visible{outline:2px solid var(--primary-glow);outline-offset:2px}
-.cover-wrap{position:relative;width:120px;height:120px;margin:0 auto .75rem}
+.cover-wrap{position:relative;width:230px;height:230px;margin:0 auto 1rem}
 .cover{width:100%;height:100%;border-radius:12px;object-fit:cover;
   transition:border-radius .3s;background:var(--surface-2)}
 .cover-ph{display:flex;align-items:center;justify-content:center;
@@ -108,8 +108,8 @@ a:hover{text-decoration:underline}
 .card:hover .cover-wrap::after{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.card:hover .cover{animation:none}}
-.card .artist{font-weight:600;font-size:.95rem}
-.card .track{color:var(--muted);font-size:.85rem}
+.card .artist{font-weight:600;font-size:1.15rem}
+.card .track{color:var(--muted);font-size:.95rem;margin-top:.15rem}
 .hidden{display:none}
 .more-btn{display:block;margin:1.75rem auto 0;padding:.7rem 1.5rem;background:var(--primary);
   color:#fff;border:none;border-radius:999px;font-family:'Poppins';font-weight:600;
@@ -264,52 +264,10 @@ a:hover{text-decoration:underline}
 @media (prefers-reduced-motion:reduce){.eq span{animation:none;height:32px}.landing{animation:none}}
 """
 
-# Painterly page background: faded purple brush strokes given a bristly, dragged-brush
-# edge via SVG turbulence displacement, plus a faint canvas grain, over the near-black
-# base. Inlined as a base64 data URI so pages stay self-contained (no external assets).
-_BACKGROUND_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1200' \
-viewBox='0 0 1600 1200'>
-<defs>
-<filter id='bristle' x='-20%' y='-20%' width='140%' height='140%'>
-<feTurbulence type='fractalNoise' baseFrequency='0.012 0.16' numOctaves='2' seed='7' result='n'/>
-<feDisplacementMap in='SourceGraphic' in2='n' scale='34' xChannelSelector='R' yChannelSelector='G'/>
-<feGaussianBlur stdDeviation='1.1'/>
-</filter>
-<filter id='grain'>
-<feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/>
-<feColorMatrix type='saturate' values='0'/>
-<feComponentTransfer><feFuncA type='linear' slope='0.035'/></feComponentTransfer>
-</filter>
-</defs>
-<rect width='100%' height='100%' fill='#0c0a14'/>
-<g filter='url(#bristle)' fill='none' stroke-linecap='round'>
-<path d='M-120,300 C 400,210 900,390 1760,250' stroke='#7c3aed' \
-stroke-width='95' opacity='0.11'/>
-<path d='M-120,540 C 520,660 1000,430 1760,610' stroke='#a855f7' \
-stroke-width='60' opacity='0.08'/>
-<path d='M-120,860 C 450,750 1120,1000 1760,820' stroke='#5b21b6' \
-stroke-width='130' opacity='0.10'/>
-<path d='M-120,1060 C 620,1160 1050,940 1760,1090' stroke='#7c3aed' \
-stroke-width='52' opacity='0.07'/>
-<path d='M240,-60 C 320,400 250,820 420,1300' stroke='#a855f7' \
-stroke-width='42' opacity='0.06'/>
-<path d='M1320,-60 C 1250,400 1420,820 1300,1300' stroke='#6d28d9' \
-stroke-width='72' opacity='0.07'/>
-</g>
-<rect width='100%' height='100%' filter='url(#grain)'/>
-</svg>"""
-
-_BG_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(
-    _BACKGROUND_SVG.encode("utf-8")
-).decode("ascii")
-
-BASE_STYLES += (
-    'body{background-image:url("' + _BG_DATA_URI + '");'
-    "background-size:cover;background-position:center;background-attachment:fixed}"
-)
-
-
-def _html_page(title: str, body: str) -> str:
+def _html_page(title: str, body: str, wide: bool = False) -> str:
+    # The recommendations grid asks for a wider container so its bigger cards fill
+    # more of the screen; every other page keeps the standard 70% width.
+    container = "container wide" if wide else "container"
     return (
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
         "<meta charset=\"utf-8\">\n"
@@ -318,7 +276,7 @@ def _html_page(title: str, body: str) -> str:
         "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?"
         "family=Poppins:wght@300;400;500;600;700&family=Righteous&display=swap\">\n"
         f"<style>{BASE_STYLES}</style>\n"
-        "</head>\n<body>\n<div class=\"container\">\n"
+        f"</head>\n<body>\n<div class=\"{container}\">\n"
         f"{body}\n</div>\n</body>\n</html>"
     )
 
@@ -690,7 +648,7 @@ def render_recommendations_page(recs, playlists=None, prefs=None) -> str:
             "generates them in the background; give it a moment and refresh.</p>"
             f"{_pagenav('prev', '/artists', 'Your Top Artists')}"
         )
-        return _html_page("Songs You Might Like", body)
+        return _html_page("Songs You Might Like", body, wide=True)
 
     cards = []
     for i, (artist, track, _score, image_url, preview_url) in enumerate(recs):
@@ -838,7 +796,7 @@ if(refreshBtn){ refreshBtn.addEventListener('click', function(){
         f"{_fine_tune_wizard(playlists, prefs)}"
         f"{script}{ft_script}"
     )
-    return _html_page("Songs You Might Like", body)
+    return _html_page("Songs You Might Like", body, wide=True)
 
 
 @app.get("/")
